@@ -72,11 +72,7 @@ public class SerialFileReceiver
         this._fileStream = stream;
         this._readBytes = readBytes;
         this._serialPort = new SerialPort(portName, baudRate);
-#if DEBUG
         this._serialPort.ReadTimeout = -1;
-#else
-        this._serialPort.ReadTimeout = 5000;
-#endif
         this._bufferSize = 1024; // 1KB
         this._buffer = new byte[_bufferSize];
         this._dataPacket = new byte[_bufferSize + 10]; // 包头(1) + 数据长度(2) + 文件名称(255) + 文件大小(4) + 数据内容(1024) + 校验和(2)
@@ -94,20 +90,35 @@ public class SerialFileReceiver
             Console.WriteLine($"File name: {_fileName}");
             Console.WriteLine($"File size: {_fileSize} bytes");
 
+            if (_fileSize <= 0) throw new Exception("Invalid file size.");
+            if (string.IsNullOrWhiteSpace(_fileName)) _fileName = Path.GetRandomFileName();
+
             ReceiveFileData();
 
             Console.WriteLine("File receive completed.");
         }
         catch (Exception ex)
         {
+            if (_serialPort.IsOpen)
+            {
+                try
+                {
+                    _serialPort.Write(new byte[] { 0xFF }, 0, 1); // stop
+                }
+                catch
+                {
+                    // ignored
+                }
+            }
+
             Console.WriteLine("Error: \n" + ex);
             throw;
         }
         finally
         {
-            _serialPort.ReadTimeout = -1; 
+            _serialPort.ReadTimeout = -1;
             _serialPort.Close();
-            _fileStream.Close(); 
+            _fileStream.Close();
         }
     }
 

@@ -40,7 +40,11 @@ public class SerialFileSender
     public SerialFileSender(string portName, int baudRate, string fileName)
     {
         this._serialPort = new SerialPort(portName, baudRate);
-        this._serialPort.ReadTimeout = 5000;
+        #if DEBUG
+            this._serialPort.ReadTimeout = 5000;
+        #else 
+            this._serialPort.ReadTimeout = 5000;
+        #endif
         this._fileName = fileName;
         this._fileSize = new FileInfo(fileName).Length;
         this._fileStream = new FileStream(fileName, FileMode.Open, FileAccess.Read);
@@ -57,13 +61,27 @@ public class SerialFileSender
             _serialPort.Open();
             SendFileInfo();
             SendFileData();
-            _serialPort.Close();
-            _fileStream.Close();
             Console.WriteLine("File transfer completed.");
         }
         catch (Exception ex)
         {
+            if (_serialPort.IsOpen)
+            {
+                try
+                {
+                    _serialPort.Write(new byte[] { 0xFF }, 0, 1); // stop
+                }
+                catch
+                {
+                    // ignored
+                }
+            }
             Console.WriteLine("Error: \n" + ex);
+        }
+        finally
+        {
+            _serialPort.Close();
+            _fileStream.Close(); 
         }
     }
 

@@ -37,26 +37,33 @@ var keepListening = args.Contains("--loop");
 
 while (true)
 {
-    Console.WriteLine("Waiting for sfs-side response...");
-    var t = SerialFileReceiver.WaitAt(port);
-
-    t.Wait();
-
-    var result = t.Result;
-
-    if (result.Success)
+    try
     {
-        Console.WriteLine("File transfer completed.");
-        Console.WriteLine($"Temp file: {result.TmpFileName}");
-        var tmp = result.TmpFileName;
-        var fileName = Path.Combine(dir, result.FileName);
-        File.Move(tmp, fileName, args.Contains("--overwrite"));
-        Console.WriteLine($"File saved to: {fileName}");
-    }
-    else
-    {
-        Console.WriteLine($"File transfer failed: {result.Message}");
-    }
+        Console.WriteLine("Waiting for sfs-side response...");
+        var t = SerialFileReceiver.WaitAt(port);
 
-    if (!keepListening) break;
+        t.Wait();
+
+        var result = t.Result;
+
+        if (result.Success)
+        {
+            Console.WriteLine("File transfer completed.");
+            Console.WriteLine($"Temp file: {result.TmpFileName}");
+            var tmp = result.TmpFileName;
+            var fileName = Path.Combine(dir, result.FileName);
+            File.Move(tmp, fileName, args.Contains("--overwrite"));
+            Console.WriteLine($"File saved to: {fileName}");
+        }
+        else
+        {
+            Console.WriteLine($"File transfer failed: {result.Message}");
+        }
+
+        if (!keepListening) break;
+    }
+    catch (Exception e)
+    {
+        Console.WriteLine(e); 
+    }
 }

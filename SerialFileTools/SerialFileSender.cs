@@ -11,6 +11,7 @@ using System.IO.Ports;
 /// </summary>
 public class SerialFileSender
 {
+    const int BaudRate = 115200;
     private readonly SerialPort _serialPort;
     private readonly string _fileName;
     private readonly long _fileSize;
@@ -18,8 +19,7 @@ public class SerialFileSender
     private readonly byte[] _buffer;
     private readonly int _bufferSize;
     private int _readBytes;
-    private readonly byte[] _dataPacket;
-
+    private readonly byte[] _dataPacket; 
     public static SerialFileSender Create(string fileName, string? port = null)
     { 
         
@@ -34,7 +34,7 @@ public class SerialFileSender
             throw new Exception("No serial port found.");
         }
         
-        return new SerialFileSender(port, 115200, fileName);
+        return new SerialFileSender(port, BaudRate, fileName);
     }
 
     public SerialFileSender(string portName, int baudRate, string fileName)
@@ -65,17 +65,6 @@ public class SerialFileSender
         }
         catch (Exception ex)
         {
-            if (_serialPort.IsOpen)
-            {
-                try
-                {
-                    _serialPort.Write(new byte[] { 0xFF }, 0, 1); // stop
-                }
-                catch
-                {
-                    // ignored
-                }
-            }
             Console.WriteLine("Error: \n" + ex);
         }
         finally

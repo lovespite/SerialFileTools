@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.IO.Ports;
 
+
 namespace SerialFileTools;
 
 public class ReceiveResult
@@ -15,6 +16,7 @@ public class ReceiveResult
 
 public class SerialFileReceiver
 {
+    private const int BaudRate = 115200;
     private readonly SerialPort _serialPort;
     private long _fileSize;
     private readonly Stream _fileStream;
@@ -46,7 +48,7 @@ public class SerialFileReceiver
         return Task.Run(() =>
         {
             using var fileStream = new FileStream(tmp, FileMode.Create, FileAccess.Write);
-            var sfr = new SerialFileReceiver(port, 115200, fileStream, 1024);
+            var sfr = new SerialFileReceiver(port, BaudRate, fileStream, 1024);
             var result = new ReceiveResult();
             try
             {
@@ -130,7 +132,7 @@ public class SerialFileReceiver
         _serialPort.Read(_dataPacket, 0, 262);
         if (_dataPacket[0] != 0xAA)
         {
-            throw new Exception("Invalid data packet.");
+            throw new Exception("Invalid data packet: " + _dataPacket[0].ToString("X2"));
         }
 
         int fileNameLength = (_dataPacket[1] << 8) | _dataPacket[2];
@@ -152,6 +154,13 @@ public class SerialFileReceiver
         {
             Array.Clear(_dataPacket, 0, _dataPacket.Length);
             _serialPort.Read(_dataPacket, 0, _bufferSize + 10);
+
+            if (_dataPacket[0] == 0xFF)
+            {
+                // stop signal
+                throw new Exception("Stop signal received.");
+            }
+
             if (_dataPacket[0] != 0xAA)
             {
                 throw new Exception("Invalid data packet.");

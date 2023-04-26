@@ -1,6 +1,13 @@
 ﻿// See https://aka.ms/new-console-template for more information
 
+using System.IO.Ports;
 using SerialFileTools;
+
+if (args.Contains("--list-ports"))
+{ 
+    SerialPort.GetPortNames().ToList().ForEach(Console.WriteLine);
+    return;
+}
 
 var arg = args.FirstOrDefault();
 if (arg == null)

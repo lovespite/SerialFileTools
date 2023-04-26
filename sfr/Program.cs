@@ -1,6 +1,13 @@
 ﻿// See https://aka.ms/new-console-template for more information
 
+using System.IO.Ports;
 using SerialFileTools;
+
+if (args.Contains("--list-ports"))
+{ 
+    SerialPort.GetPortNames().ToList().ForEach(Console.WriteLine);
+    return;
+}
 
 var dir = args.FirstOrDefault();
 var port = args.Skip(1).FirstOrDefault();
@@ -26,6 +33,8 @@ if (!Directory.Exists(dir))
 
 Console.WriteLine("Listen at :" + port);
 
+var keepListening = args.Contains("--loop");
+
 while (true)
 {
     Console.WriteLine("Waiting for sfs-side response...");
@@ -49,5 +58,5 @@ while (true)
         Console.WriteLine($"File transfer failed: {result.Message}");
     }
 
-    Task.Delay(500).Wait();
+    if (!keepListening) break;
 }

@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SerialFileTools", "SerialFileTools\SerialFileTools.csproj", "{4C893E6F-117C-49C0-8709-56B1ABCB9FF0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "sfs", "sfs\sfs.csproj", "{246F87C9-CF11-49D1-890F-342344893327}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "sfr", "sfr\sfr.csproj", "{AF2B70AF-D654-4F89-AAB4-05308DBCA122}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4C893E6F-117C-49C0-8709-56B1ABCB9FF0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4C893E6F-117C-49C0-8709-56B1ABCB9FF0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4C893E6F-117C-49C0-8709-56B1ABCB9FF0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4C893E6F-117C-49C0-8709-56B1ABCB9FF0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{246F87C9-CF11-49D1-890F-342344893327}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{246F87C9-CF11-49D1-890F-342344893327}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{246F87C9-CF11-49D1-890F-342344893327}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{246F87C9-CF11-49D1-890F-342344893327}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AF2B70AF-D654-4F89-AAB4-05308DBCA122}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AF2B70AF-D654-4F89-AAB4-05308DBCA122}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AF2B70AF-D654-4F89-AAB4-05308DBCA122}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AF2B70AF-D654-4F89-AAB4-05308DBCA122}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -49,7 +49,7 @@ public class SerialFileReceiver
             var sfr = new SerialFileReceiver(port, 115200, fileStream, 1024);
             var result = new ReceiveResult();
             try
-            { 
+            {
                 sfr.Start();
                 result.Success = true;
                 result.FileName = sfr.FileName;
@@ -60,7 +60,8 @@ public class SerialFileReceiver
             {
                 result.Message = e.Message;
                 result.Success = false;
-            } 
+            }
+
             return result;
         });
     }
@@ -71,9 +72,14 @@ public class SerialFileReceiver
         this._fileStream = stream;
         this._readBytes = readBytes;
         this._serialPort = new SerialPort(portName, baudRate);
+#if DEBUG
+        this._serialPort.ReadTimeout = -1;
+#else
+        this._serialPort.ReadTimeout = 5000;
+#endif
         this._bufferSize = 1024; // 1KB
         this._buffer = new byte[_bufferSize];
-        this._dataPacket = new byte[_bufferSize + 8]; // 包头(1) + 数据长度(2) + 文件名称(255) + 文件大小(4) + 数据内容(1024) + 校验和(2)
+        this._dataPacket = new byte[_bufferSize + 10]; // 包头(1) + 数据长度(2) + 文件名称(255) + 文件大小(4) + 数据内容(1024) + 校验和(2)
     }
 
     public void Start()
@@ -83,19 +89,25 @@ public class SerialFileReceiver
             _serialPort.Open();
             ReceiveFileInfo();
 
+            _serialPort.ReadTimeout = 5000;
             // print file info
             Console.WriteLine($"File name: {_fileName}");
             Console.WriteLine($"File size: {_fileSize} bytes");
 
             ReceiveFileData();
-            _serialPort.Close();
-            _fileStream.Close();
 
             Console.WriteLine("File receive completed.");
         }
         catch (Exception ex)
         {
-            Console.WriteLine("Error: " + ex.Message);
+            Console.WriteLine("Error: \n" + ex);
+            throw;
+        }
+        finally
+        {
+            _serialPort.ReadTimeout = -1; 
+            _serialPort.Close();
+            _fileStream.Close(); 
         }
     }
 

@@ -1,4 +1,5 @@
 ﻿// See https://aka.ms/new-console-template for more information
+
 using SerialFileTools;
 
 var dir = args.FirstOrDefault();
@@ -19,28 +20,34 @@ if (!Directory.Exists(dir))
     catch (Exception e)
     {
         Console.WriteLine(e.Message);
-        return; 
+        return;
     }
 }
 
-Console.WriteLine("Waiting for sfs-side response...");
+Console.WriteLine("Listen at :" + port);
 
-var t = SerialFileReceiver.WaitAt(port);
-
-t.Wait();
-
-var result = t.Result;
-
-if (result.Success)
+while (true)
 {
-    Console.WriteLine("File transfer completed."); 
-    Console.WriteLine($"Temp file: {result.TmpFileName}");
-    var tmp = result.TmpFileName;
-    var fileName = Path.Combine(dir, result.FileName);
-    File.Move(tmp, fileName, args.Contains("--overwrite"));
-    Console.WriteLine($"File saved to: {fileName}");
-}
-else
-{
-    Console.WriteLine($"File transfer failed: {result.Message}");
+    Console.WriteLine("Waiting for sfs-side response...");
+    var t = SerialFileReceiver.WaitAt(port);
+
+    t.Wait();
+
+    var result = t.Result;
+
+    if (result.Success)
+    {
+        Console.WriteLine("File transfer completed.");
+        Console.WriteLine($"Temp file: {result.TmpFileName}");
+        var tmp = result.TmpFileName;
+        var fileName = Path.Combine(dir, result.FileName);
+        File.Move(tmp, fileName, args.Contains("--overwrite"));
+        Console.WriteLine($"File saved to: {fileName}");
+    }
+    else
+    {
+        Console.WriteLine($"File transfer failed: {result.Message}");
+    }
+
+    Task.Delay(500).Wait();
 }

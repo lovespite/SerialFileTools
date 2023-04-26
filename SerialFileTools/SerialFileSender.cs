@@ -40,13 +40,14 @@ public class SerialFileSender
     public SerialFileSender(string portName, int baudRate, string fileName)
     {
         this._serialPort = new SerialPort(portName, baudRate);
+        this._serialPort.ReadTimeout = 5000;
         this._fileName = fileName;
         this._fileSize = new FileInfo(fileName).Length;
         this._fileStream = new FileStream(fileName, FileMode.Open, FileAccess.Read);
         this._bufferSize = 1024; // 1KB
         this._buffer = new byte[_bufferSize];
         this._readBytes = 0;
-        this._dataPacket = new byte[_bufferSize + 8]; // 包头(1) + 数据长度(2) + 文件名称(255) + 文件大小(4) + 数据内容(1024) + 校验和(2)
+        this._dataPacket = new byte[_bufferSize + 10]; // 包头(1) + 数据长度(2) + 文件名称(255) + 文件大小(4) + 数据内容(1024) + 校验和(2)
     }
 
     public void Start()
@@ -62,7 +63,7 @@ public class SerialFileSender
         }
         catch (Exception ex)
         {
-            Console.WriteLine("Error: " + ex.Message);
+            Console.WriteLine("Error: \n" + ex);
         }
     }
 
@@ -119,9 +120,8 @@ public class SerialFileSender
             
             // print progress at same the place 
             Console.SetCursorPosition(0, Console.CursorTop);
-            Console.Write($"Progress: {i + 1}/{packetCount}");
-            
-            
+            Console.Write($"Pipeline: {i + 1}/{packetCount} blocks ...");
         }
+        Console.WriteLine("\nPipeline completed.");
     }
 }

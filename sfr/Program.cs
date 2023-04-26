@@ -37,7 +37,7 @@ if (result.Success)
     Console.WriteLine($"Temp file: {result.TmpFileName}");
     var tmp = result.TmpFileName;
     var fileName = Path.Combine(dir, result.FileName);
-    File.Move(tmp, fileName);
+    File.Move(tmp, fileName, args.Contains("--overwrite"));
     Console.WriteLine($"File saved to: {fileName}");
 }
 else

@@ -7,6 +7,10 @@ cross platform serial port file transfer tool
 
 # Usage
 
+## Common
+
+```sfs --list-ports``` or ```sfr --list-ports``` list all available serial ports
+
 ## Receiver Side
 
 ```sfr <dir> [port] [options]```

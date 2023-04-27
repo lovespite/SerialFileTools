@@ -17,7 +17,7 @@ cross platform serial port file transfer tool
 - dir: directory where files saved to
 - port: serial port name
 - options
-  - ```--loop``` keep listening util exit manually
+  - ```--loop``` keep listening until exit manually
   - ```--overwrite``` overwrite files in dir
   
 ## Sender Side

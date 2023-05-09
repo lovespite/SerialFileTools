@@ -1,69 +1,78 @@
-﻿// See https://aka.ms/new-console-template for more information
-
-using System.IO.Ports;
+﻿using System.IO.Ports;
+using System.Text;
 using SerialFileTools;
+using sfr;
 
-if (args.Contains("--list-ports"))
-{ 
+var modeListPorts = args.Contains("--list-ports") || args.Contains("-l");
+var modeShowDetail = args.Contains("--detail") || args.Contains("-d");
+
+var modeBehavior = args.Contains("--send") || args.Contains("-s")
+    ? PortMode.Send
+    : args.Contains("--receive") || args.Contains("-r")
+        ? PortMode.Receive
+        : PortMode.Send;
+
+if (modeListPorts)
+{
     SerialPort.GetPortNames().ToList().ForEach(Console.WriteLine);
     return;
 }
 
-var dir = args.FirstOrDefault();
-var port = args.Skip(1).FirstOrDefault();
+var port = args.FirstOrDefault();
 
-if (dir == null)
+if (string.IsNullOrWhiteSpace(port))
 {
-    Console.WriteLine("Usage: sfr <dir> [port]");
+    Console.WriteLine("Usage: sfr <port> <--send|--receive> [--parameter=9600,8,N,1] [--file=<file>] [--list-ports]");
     return;
 }
 
-if (!Directory.Exists(dir))
+if (port.Equals("."))
 {
-    try
+    port = SerialPort.GetPortNames().FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(port))
     {
-        Directory.CreateDirectory(dir);
-    }
-    catch (Exception e)
-    {
-        Console.WriteLine(e.Message);
+        Console.WriteLine("No serial port found.");
         return;
     }
 }
 
-Console.WriteLine("Listen at :" + port);
+var file = (args
+    .Where(a => a.StartsWith("--file="))
+    .Select(a => a[7..])
+    .FirstOrDefault() ?? args
+    .Where(a => a.StartsWith("-f="))
+    .Select(a => a[3..])
+    .FirstOrDefault()) ?? Path.GetTempFileName();
 
-var keepListening = args.Contains("--loop");
+var parameter = args.Where(a => a.StartsWith("--parameter="))
+    .Select(a => a[12..])
+    .FirstOrDefault() ?? args
+    .Where(a => a.StartsWith("-p="))
+    .Select(a => a[3..])
+    .FirstOrDefault();
 
-while (true)
+var serialPort = SerialPortHelper.Create(port, parameter);
+
+serialPort.Open();
+
+switch (modeBehavior)
 {
-    try
-    {
-        Console.WriteLine("Waiting for sfs-side response...");
-        var t = SerialFileReceiver.WaitAt(port);
-
-        t.Wait();
-
-        var result = t.Result;
-
-        if (result.Success)
-        {
-            Console.WriteLine("File transfer completed.");
-            Console.WriteLine($"Temp file: {result.TmpFileName}");
-            var tmp = result.TmpFileName;
-            var fileName = Path.Combine(dir, result.FileName);
-            File.Move(tmp, fileName, args.Contains("--overwrite"));
-            Console.WriteLine($"File saved to: {fileName}");
-        }
-        else
-        {
-            Console.WriteLine($"File transfer failed: {result.Message}");
-        }
-
-        if (!keepListening) break;
-    }
-    catch (Exception e)
-    {
-        Console.WriteLine(e); 
-    }
+    case PortMode.Send:
+        UsingSendingMode(serialPort, file);
+        break;
+    case PortMode.Receive:
+        UsingReceivingMode(serialPort, file);
+        break;
 }
+
+void UsingReceivingMode(SerialPort serialPortInstance, string fileToReceive)
+{
+    SerialPortHelper.ReceiveFile(serialPortInstance, fileToReceive, modeShowDetail);
+}
+
+void UsingSendingMode(SerialPort serialPortInstance, string fileToSend)
+{
+    SerialPortHelper.SendFile(serialPortInstance, fileToSend, modeShowDetail);
+}
+
+// Console.ReadKey();

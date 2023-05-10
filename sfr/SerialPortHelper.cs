@@ -3,7 +3,7 @@ using System.IO.Ports;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace SerialFileTools;
+namespace sfr;
 
 public class FileInfo
 {
@@ -14,9 +14,27 @@ public class FileInfo
 
 public static class SerialPortHelper
 {
-    public static SerialPort Create(string portName, string? parameter = "9600,8,N,1")
+    private static readonly byte[] FeedBack = { 0xBB };
+    private static readonly byte[] StopFlag = { 0xFF };
+
+    private static int BlockSize = 256;
+    public static void SetBlockSize(int size)
     {
-        parameter ??= "9600,8,N,1";
+        if (size < 128 || size > 40960) throw new Exception("Invalid block size. Must be between 128 and 40960.");
+        BlockSize = size;
+    }
+    
+    public static int GetBlockSize() => BlockSize;
+
+
+    private static int TransInterval = 20; // ms
+    public static void SetTransInterval(int ms) => TransInterval = ms;
+    public static int GetTransInterval() => TransInterval;
+
+
+    public static SerialPort Create(string portName, string? parameter = "115200,8,N,1")
+    {
+        parameter ??= "115200,8,N,1";
 
         var parts = parameter.Split(',');
         var baudRate = int.Parse(parts[0]);
@@ -40,26 +58,6 @@ public static class SerialPortHelper
         return new SerialPort(portName, baudRate, parity, dataBits, stopBits);
     }
 
-    private static void SendData(SerialPort sp, Memory<byte> data)
-    {
-        if (!sp.IsOpen)
-        {
-            sp.Open();
-        }
-
-        sp.Write(data.Span.ToArray(), 0, data.Length);
-    }
-
-    private static void SendData(SerialPort sp, string data)
-    {
-        if (!sp.IsOpen)
-        {
-            sp.Open();
-        }
-
-        sp.Write(data);
-    }
-
     private static void SendFileInfo(SerialPort sp, string file)
     {
         var fileInfo = new System.IO.FileInfo(file);
@@ -67,16 +65,19 @@ public static class SerialPortHelper
         var size = fileInfo.Length;
 
         var nameBytes = Encoding.UTF8.GetBytes(name);
+
+        if (nameBytes.Length > 226) throw new Exception("File name too long.");
+
         var sha1Bytes = SHA1.HashData(File.ReadAllBytes(file));
         var sizeBytes = BitConverter.GetBytes(size);
 
         var buffer = new byte[256];
         Array.Clear(buffer);
         buffer[0] = 0xAA;
+
         Array.Copy(sizeBytes, 0, buffer, 1, sizeBytes.Length);
         Array.Copy(sha1Bytes, 0, buffer, 9, sha1Bytes.Length);
         Array.Copy(nameBytes, 0, buffer, 29, nameBytes.Length);
-
 
         sp.Write(buffer, 0, 256);
         Console.WriteLine(Convert.ToHexString(buffer));
@@ -84,20 +85,22 @@ public static class SerialPortHelper
 
     private static void SendFileData(SerialPort sp, string file, bool showDetail = false)
     {
-        if (!sp.IsOpen)
-        {
-            sp.Open();
-        }
-
         using var fs = File.OpenRead(file);
         var buffer = new byte[256];
         var read = 0;
+        var totalRead = 0;
         while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
         {
+            totalRead += read;
+
             sp.Write(buffer, 0, read);
             if (showDetail) Console.WriteLine(Convert.ToHexString(buffer, 0, read));
 
-            Task.Delay(50).Wait();
+            // print progress
+            Console.SetCursorPosition(0, Console.CursorTop);
+            Console.Write($"\r{totalRead}/{fs.Length} {totalRead * 100 / fs.Length}%");
+
+            Task.Delay(TransInterval).Wait();
 
             if (sp.ReadByte() != 0xBB) throw new Exception("Error sending file.");
         }
@@ -105,11 +108,6 @@ public static class SerialPortHelper
 
     private static FileInfo? ReceiveFileInfo(SerialPort sp)
     {
-        if (!sp.IsOpen)
-        {
-            sp.Open();
-        }
-
         while (sp.ReadByte() != 0xAA)
         {
         }
@@ -142,16 +140,8 @@ public static class SerialPortHelper
         };
     }
 
-    private static readonly byte[] FeedBack = { 0xBB };
-    private static readonly byte[] StopFlag = { 0xFF };
-
     private static string ReceiveFileData(SerialPort sp, string dir, FileInfo file, bool showDetail = false)
     {
-        if (!sp.IsOpen)
-        {
-            sp.Open();
-        }
-
         var filePathname = Path.Combine(dir, file.Name);
         using var fs = File.Create(filePathname);
         var buffer = new byte[256];
@@ -172,10 +162,10 @@ public static class SerialPortHelper
                 Console.SetCursorPosition(0, Console.CursorTop);
                 Console.Write($"\r{totalRead}/{file.Length} {totalRead * 100 / file.Length}%");
             }
- 
+
+            Task.Delay(TransInterval).Wait();
             sp.Write(FeedBack, 0, 1);
 
-            Task.Delay(50).Wait();
             if (totalRead >= file.Length) break;
         }
 
@@ -187,7 +177,7 @@ public static class SerialPortHelper
     {
         sp.DiscardOutBuffer();
         sp.DiscardInBuffer();
-        
+
         SendFileInfo(sp, file);
 
         Task.Delay(50).Wait();
@@ -227,11 +217,11 @@ public static class SerialPortHelper
 
         Task.Delay(50).Wait();
         sp.DiscardInBuffer();
-        
+
         sp.Write(FeedBack, 0, 1);
         Task.Delay(50).Wait();
-        
-        var f = ReceiveFileData(sp, dir, file, showDetail);
+
+        var f = ReceiveFileData(sp, d.FullName, file, showDetail);
         var sha1 = SHA1.HashData(File.ReadAllBytes(f));
         if (!sha1.SequenceEqual(file.Sha1))
         {

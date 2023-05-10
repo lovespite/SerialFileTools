@@ -8,7 +8,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\SerialFileTools\SerialFileTools.csproj" />
+      <PackageReference Include="System.IO.Ports" Version="7.0.0" />
     </ItemGroup>
 
 </Project>

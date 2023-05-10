@@ -1,4 +1,4 @@
-namespace SerialFileTools;
+namespace sfr;
 
 public enum InitialCrcValue { Zeros, NonZero1 = 0xffff, NonZero2 = 0x1D0F }
 public class Crc16Ccitt

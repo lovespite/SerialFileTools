@@ -94,6 +94,8 @@ public static class SerialPortHelper
         var buffer = new byte[_blockSize];
         var read = 0;
         var totalRead = 0;
+        var sw = new Stopwatch();
+        sw.Start();
         while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
         {
             totalRead += read;
@@ -103,14 +105,22 @@ public static class SerialPortHelper
 
             if (showDetail) Console.WriteLine(Convert.ToHexString(buffer, 0, read));
 
+            // calculate speed
+            var speed = totalRead / 1024f * 1000 / sw.ElapsedMilliseconds; // KB/s
+            
+            // calculate remaining time
+            var remaining = (fs.Length - totalRead) / 1024f; // KB
+            var remainingTime = remaining / speed; // seconds 
+
             // print progress
             Console.SetCursorPosition(0, Console.CursorTop);
-            Console.Write($"\r{totalRead}/{fs.Length} {totalRead * 100 / fs.Length}%");
+            Console.Write($"\r{totalRead}/{fs.Length} {totalRead * 100 / fs.Length}% at {speed:F2} KB/s, remaining {remainingTime:F2} s.");
 
             if (_transInterval > 0) Task.Delay(_transInterval).Wait();
 
             if (sp.ReadByte() != 0xBB) throw new Exception("Error sending file.");
         }
+        sw.Stop();
     }
 
     private static FileInfo? ReceiveFileInfo(SerialPort sp)

@@ -1,6 +1,5 @@
 ﻿using System.Diagnostics;
 using System.IO.Ports;
-using System.Reflection;
 using System.Text;
 using sfr;
 
@@ -16,6 +15,35 @@ var modeListPorts = args.Contains("--list-ports") || args.Contains("-l");
 if (modeListPorts)
 {
     SerialPort.GetPortNames().ToList().ForEach(Console.WriteLine);
+    return;
+}
+
+var modeListDevices = args.Contains("--list-devices") || args.Contains("-L");
+if (modeListDevices)
+{
+    var devs = USBHelper.ListDevices();
+    foreach (var dev in devs)
+    {
+        try
+        {
+            dev.Open(out var device);
+            Console.WriteLine(dev.Name);
+            Console.WriteLine(" -      FullName: " + dev.FullName);
+            Console.WriteLine(" -           Vid: " + dev.Vid);
+            Console.WriteLine(" -           Pid: " + dev.Pid);
+            Console.WriteLine(" -         Count: " + dev.Count);
+            Console.WriteLine(" -       Address: " + dev.DevicePath);
+            Console.WriteLine(" -  Manufacturer: " + device.Info.ManufacturerString);
+            Console.WriteLine(" -       Product: " + device.Info.ProductString);
+            Console.WriteLine(" -     SerialNum: " + device.Info.SerialString);
+            Console.WriteLine(" -    Descriptor: " + device.Info.Descriptor.Class.ToString()); 
+        }
+        catch
+        {
+            // ignored
+        }
+    }
+
     return;
 }
 

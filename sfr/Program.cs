@@ -66,7 +66,7 @@ if (string.IsNullOrWhiteSpace(port))
 
 if (port.Equals("."))
 {
-    port = SerialPort.GetPortNames().FirstOrDefault();
+    port = SerialPort.GetPortNames().FirstOrDefault(a => a.StartsWith("/dev/tty.usbserial") || a.StartsWith("COM"));
     if (string.IsNullOrWhiteSpace(port))
     {
         Console.WriteLine("No serial port found.");
@@ -125,7 +125,7 @@ void HandleDebugReceiving(SerialPort serialPortInstance, string viewMode, Stream
     var transInterval = SerialPortHelper.GetTransInterval();
     var maxDataBfSize = dataBlockSize * 12;
     var ms = fs is null ? new MemoryStream(maxDataBfSize) : null;
-    
+
     if (fs is not null)
     {
         Console.WriteLine("Bytes data received redirecting to file: " + fileRedirect);
@@ -268,8 +268,8 @@ void UsingReceivingMode(string portName, string? portParameter, string fileToRec
         catch (Exception e)
         {
             Console.WriteLine(e.Message);
-        } 
-        
+        }
+
         if (modeKeepOpen) continue;
         break;
     }

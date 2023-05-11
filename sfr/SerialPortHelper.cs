@@ -71,7 +71,7 @@ public static class SerialPortHelper
 
         if (nameBytes.Length > FileInfoBlockSize - 49) throw new Exception("File name too long.");
 
-        var sha1Bytes = Crc16Ccitt.GetFileCrc16Bytes(file); // SHA1.HashData(File.ReadAllBytes(file));
+        var sha1Bytes = SHA1.HashData(File.ReadAllBytes(file));
         var sizeBytes = BitConverter.GetBytes(size);
         var blockSizeBytes = BitConverter.GetBytes(_blockSize);
 
@@ -115,6 +115,7 @@ public static class SerialPortHelper
 
     private static FileInfo? ReceiveFileInfo(SerialPort sp)
     {
+        sp.ReadTimeout = SerialPort.InfiniteTimeout;
         while (sp.ReadByte() != 0xAA)
         {
         }
@@ -129,7 +130,7 @@ public static class SerialPortHelper
 
         var sizeBytes = new byte[8];
         var blockSizeBytes = new byte[8];
-        var sha1Bytes = new byte[2];
+        var sha1Bytes = new byte[20];
         var nameBytes = new byte[FileInfoBlockSize - 49];
 
         Array.Copy(buffer, 1, sizeBytes, 0, sizeBytes.Length);
@@ -255,7 +256,7 @@ public static class SerialPortHelper
             " - Name: {0}\n - Size: {1} B\n - Sign: {2}",
             file.Name,
             file.Length,
-            BitConverter.ToString(file.Sha1).Replace("-", "")
+            Convert.ToHexString(file.Sha1)
         );
 
         Task.Delay(50).Wait();
@@ -273,7 +274,7 @@ public static class SerialPortHelper
             "\nReceived in {0} s, at {1:F2} KB/s",
             sw.ElapsedMilliseconds / 1000f, (file.Length / 1024f / sw.ElapsedMilliseconds * 1000f));
 
-        var sha1 = Crc16Ccitt.GetFileCrc16Bytes(f); //SHA1.HashData(File.ReadAllBytes(f));
+        var sha1 = SHA1.HashData(File.ReadAllBytes(f));
 
         Console.WriteLine(!sha1.SequenceEqual(file.Sha1)
             ? "\n❌  Error receiving file. Signature mismatch."

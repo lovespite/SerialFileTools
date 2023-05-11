@@ -17,19 +17,22 @@ public static class SerialPortHelper
     private static readonly byte[] FeedBack = { 0xBB };
     private static readonly byte[] StopFlag = { 0xFF };
 
-    private static int BlockSize = 256;
+    private static int _blockSize = 1024;
+    private static readonly int FileInfoBlockSize = 512;
+
     public static void SetBlockSize(int size)
     {
-        if (size < 128 || size > 40960) throw new Exception("Invalid block size. Must be between 128 and 40960.");
-        BlockSize = size;
+        if (size is < 128 or > 40960)
+            throw new Exception("Invalid block size `" + size + "`. Must be between 128 and 40960.");
+        _blockSize = size;
     }
-    
-    public static int GetBlockSize() => BlockSize;
+
+    public static int GetBlockSize() => _blockSize;
 
 
-    private static int TransInterval = 20; // ms
-    public static void SetTransInterval(int ms) => TransInterval = ms;
-    public static int GetTransInterval() => TransInterval;
+    private static int _transInterval; // ms
+    public static void SetTransInterval(int ms) => _transInterval = ms;
+    public static int GetTransInterval() => _transInterval;
 
 
     public static SerialPort Create(string portName, string? parameter = "115200,8,N,1")
@@ -66,41 +69,45 @@ public static class SerialPortHelper
 
         var nameBytes = Encoding.UTF8.GetBytes(name);
 
-        if (nameBytes.Length > 226) throw new Exception("File name too long.");
+        if (nameBytes.Length > FileInfoBlockSize - 49) throw new Exception("File name too long.");
 
-        var sha1Bytes = SHA1.HashData(File.ReadAllBytes(file));
+        var sha1Bytes = Crc16Ccitt.GetFileCrc16Bytes(file); // SHA1.HashData(File.ReadAllBytes(file));
         var sizeBytes = BitConverter.GetBytes(size);
+        var blockSizeBytes = BitConverter.GetBytes(_blockSize);
 
-        var buffer = new byte[256];
+        var buffer = new byte[FileInfoBlockSize];
         Array.Clear(buffer);
         buffer[0] = 0xAA;
 
         Array.Copy(sizeBytes, 0, buffer, 1, sizeBytes.Length);
-        Array.Copy(sha1Bytes, 0, buffer, 9, sha1Bytes.Length);
-        Array.Copy(nameBytes, 0, buffer, 29, nameBytes.Length);
+        Array.Copy(blockSizeBytes, 0, buffer, 9, blockSizeBytes.Length);
+        Array.Copy(sha1Bytes, 0, buffer, 17, sha1Bytes.Length);
+        Array.Copy(nameBytes, 0, buffer, 49, nameBytes.Length);
 
-        sp.Write(buffer, 0, 256);
-        Console.WriteLine(Convert.ToHexString(buffer));
+        sp.Write(buffer, 0, buffer.Length);
+        // Console.WriteLine(Convert.ToHexString(buffer));
     }
 
     private static void SendFileData(SerialPort sp, string file, bool showDetail = false)
     {
         using var fs = File.OpenRead(file);
-        var buffer = new byte[256];
+        var buffer = new byte[_blockSize];
         var read = 0;
         var totalRead = 0;
         while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
         {
             totalRead += read;
 
-            sp.Write(buffer, 0, read);
+            // Send data block
+            sp.Write(buffer, 0, buffer.Length);
+
             if (showDetail) Console.WriteLine(Convert.ToHexString(buffer, 0, read));
 
             // print progress
             Console.SetCursorPosition(0, Console.CursorTop);
             Console.Write($"\r{totalRead}/{fs.Length} {totalRead * 100 / fs.Length}%");
 
-            Task.Delay(TransInterval).Wait();
+            if (_transInterval > 0) Task.Delay(_transInterval).Wait();
 
             if (sp.ReadByte() != 0xBB) throw new Exception("Error sending file.");
         }
@@ -112,23 +119,35 @@ public static class SerialPortHelper
         {
         }
 
-        var buffer = new byte[256];
+        var buffer = new byte[FileInfoBlockSize];
         buffer[0] = 0xAA;
-        var read = sp.Read(buffer, 1, buffer.Length - 1);
-        Console.WriteLine(Convert.ToHexString(buffer));
 
-        if (read == 0) return null;
+        var read = sp.ReadAtLeast(buffer, 1, buffer.Length - 1);
+        if (read < buffer.Length - 1) return null;
 
+        // Console.WriteLine(Convert.ToHexString(buffer));
 
         var sizeBytes = new byte[8];
-        var sha1Bytes = new byte[20];
-        var nameBytes = new byte[256 - 29];
+        var blockSizeBytes = new byte[8];
+        var sha1Bytes = new byte[2];
+        var nameBytes = new byte[FileInfoBlockSize - 49];
 
         Array.Copy(buffer, 1, sizeBytes, 0, sizeBytes.Length);
-        Array.Copy(buffer, 9, sha1Bytes, 0, sha1Bytes.Length);
-        Array.Copy(buffer, 29, nameBytes, 0, nameBytes.Length);
+        Array.Copy(buffer, 9, blockSizeBytes, 0, blockSizeBytes.Length);
+        Array.Copy(buffer, 17, sha1Bytes, 0, sha1Bytes.Length);
+        Array.Copy(buffer, 49, nameBytes, 0, nameBytes.Length);
 
         var size = BitConverter.ToInt64(sizeBytes);
+        var blockSize = BitConverter.ToInt32(blockSizeBytes);
+
+        if (_blockSize != blockSize)
+        {
+            Console.WriteLine(
+                $"\u26a0\ufe0f   Warning: block size mismatch. Current: {_blockSize}, received: {blockSize}.");
+            Console.WriteLine($"Change block size to {blockSize} !");
+            _blockSize = blockSize;
+        }
+
         var sha1 = sha1Bytes;
         var name = Encoding.UTF8.GetString(nameBytes).TrimEnd('\0');
 
@@ -144,15 +163,16 @@ public static class SerialPortHelper
     {
         var filePathname = Path.Combine(dir, file.Name);
         using var fs = File.Create(filePathname);
-        var buffer = new byte[256];
+        var buffer = new byte[_blockSize];
         var read = 0;
-        var totalRead = 0;
+        var totalRead = 0L;
 
-        while ((read = sp.Read(buffer, 0, buffer.Length)) > 0)
+        while ((read = sp.ReadAtLeast(buffer, 0, buffer.Length)) > 0)
         {
             if (showDetail) Console.WriteLine(Convert.ToHexString(buffer, 0, read));
 
             totalRead += read;
+            if (totalRead > file.Length) totalRead = file.Length;
 
             fs.Write(buffer, 0, read);
 
@@ -163,11 +183,19 @@ public static class SerialPortHelper
                 Console.Write($"\r{totalRead}/{file.Length} {totalRead * 100 / file.Length}%");
             }
 
-            Task.Delay(TransInterval).Wait();
+            Task.Delay(_transInterval).Wait();
             sp.Write(FeedBack, 0, 1);
 
-            if (totalRead >= file.Length) break;
+            if (totalRead < file.Length) continue;
+
+            totalRead = file.Length;
+            break;
         }
+
+        // drop padding bytes
+        fs.SetLength(file.Length);
+        fs.Flush();
+        fs.Close();
 
         return filePathname;
     }
@@ -199,6 +227,7 @@ public static class SerialPortHelper
         var d = Directory.CreateDirectory(dir);
         var file = ReceiveFileInfo(sp);
         Task.Delay(50).Wait();
+
         if (file == null)
         {
             Console.WriteLine("Error receiving file.");
@@ -209,11 +238,25 @@ public static class SerialPortHelper
         if (string.IsNullOrWhiteSpace(file.Name))
         {
             sp.Write(StopFlag, 0, 1);
+            Console.WriteLine("Empty file name.");
+            return;
+        }
+
+        // check file name
+        var invalidChars = Path.GetInvalidFileNameChars();
+        if (file.Name.IndexOfAny(invalidChars) >= 0)
+        {
+            sp.Write(StopFlag, 0, 1);
             Console.WriteLine("Invalid file name.");
             return;
         }
 
-        Console.WriteLine($"{file.Name} {file.Length} bytes {BitConverter.ToString(file.Sha1).Replace("-", "")}");
+        Console.WriteLine(
+            " - Name: {0}\n - Size: {1} B\n - Sign: {2}",
+            file.Name,
+            file.Length,
+            BitConverter.ToString(file.Sha1).Replace("-", "")
+        );
 
         Task.Delay(50).Wait();
         sp.DiscardInBuffer();
@@ -221,15 +264,19 @@ public static class SerialPortHelper
         sp.Write(FeedBack, 0, 1);
         Task.Delay(50).Wait();
 
+        var sw = new Stopwatch();
+        Console.WriteLine("Receiving...");
+        sw.Start();
         var f = ReceiveFileData(sp, d.FullName, file, showDetail);
-        var sha1 = SHA1.HashData(File.ReadAllBytes(f));
-        if (!sha1.SequenceEqual(file.Sha1))
-        {
-            Console.WriteLine("Error receiving file. Sha1 mismatch.");
-        }
-        else
-        {
-            Console.WriteLine("\n\rFile received completely.");
-        }
+        sw.Stop();
+        Console.WriteLine(
+            "\nReceived in {0} s, at {1:F2} KB/s",
+            sw.ElapsedMilliseconds / 1000f, (file.Length / 1024f / sw.ElapsedMilliseconds * 1000f));
+
+        var sha1 = Crc16Ccitt.GetFileCrc16Bytes(f); //SHA1.HashData(File.ReadAllBytes(f));
+
+        Console.WriteLine(!sha1.SequenceEqual(file.Sha1)
+            ? "\n❌  Error receiving file. Signature mismatch."
+            : "\n✅  File received completely.");
     }
 }

@@ -3,6 +3,12 @@ using System.IO.Ports;
 using System.Text;
 using sfr;
 
+CConsole.Low("SFR - Serial File Receiver v1.0.0");
+CConsole.Low("CopyRight (C) 2023, by Lovespite.");
+CConsole.Low("Protocol version: " + Protocol.ProtocolVersion.ToString("X"));
+CConsole.Low(Environment.OSVersion.ToString());
+CConsole.Low("---------------------------------");
+
 string[] allowedEncodings = { "us-ascii", "utf-8", "utf-16", "utf-32" };
 
 if (args.Length < 1 || args.Contains("--help") || args.Contains("-h"))
@@ -21,22 +27,23 @@ if (modeListPorts)
 var modeListDevices = args.Contains("--list-devices") || args.Contains("-L");
 if (modeListDevices)
 {
-    var devs = USBHelper.ListDevices();
+    var devs = USBHelper.ListDevices(true);
+    var index = 1;
     foreach (var dev in devs)
     {
         try
         {
             dev.Open(out var device);
-            Console.WriteLine(dev.Name);
-            Console.WriteLine(" -      FullName: " + dev.FullName);
-            Console.WriteLine(" -           Vid: " + dev.Vid);
-            Console.WriteLine(" -           Pid: " + dev.Pid);
-            Console.WriteLine(" -         Count: " + dev.Count);
-            Console.WriteLine(" -       Address: " + dev.DevicePath);
-            Console.WriteLine(" -  Manufacturer: " + device.Info.ManufacturerString);
-            Console.WriteLine(" -       Product: " + device.Info.ProductString);
-            Console.WriteLine(" -     SerialNum: " + device.Info.SerialString);
-            Console.WriteLine(" -    Descriptor: " + device.Info.Descriptor.Class.ToString()); 
+            Console.WriteLine($"{index++} {dev.Name}");
+            Console.WriteLine("  -      FullName: " + dev.FullName);
+            Console.WriteLine("  -           Vid: " + dev.Vid.ToString("X"));
+            Console.WriteLine("  -           Pid: " + dev.Pid.ToString("X")); 
+            Console.WriteLine("  -       Address: " + dev.DevicePath);
+            Console.WriteLine("  -  Manufacturer: " + device.Info.ManufacturerString);
+            Console.WriteLine("  -       Product: " + device.Info.ProductString);
+            Console.WriteLine("  -     SerialNum: " + device.Info.SerialString);
+            Console.WriteLine("  -    Descriptor: " + device.Info.Descriptor.Class);
+            Console.WriteLine();
         }
         catch
         {
@@ -118,12 +125,12 @@ var interval = (args
     .Select(a => a[3..])
     .FirstOrDefault()) ?? "0";
 
-var parameter = args.Where(a => a.StartsWith("--parameter="))
+var parameter = (args.Where(a => a.StartsWith("--parameter="))
     .Select(a => a[12..])
     .FirstOrDefault() ?? args
     .Where(a => a.StartsWith("-p="))
     .Select(a => a[3..])
-    .FirstOrDefault();
+    .FirstOrDefault()) ?? "460800,8,N,1";
 
 var file = args.LastOrDefault();
 if (string.IsNullOrWhiteSpace(file))
@@ -214,11 +221,9 @@ void HandleDebugReceiving(SerialPort serialPortInstance, string viewMode, Stream
             Console.WriteLine(e.Message);
         }
     }
-
-    ;
 }
 
-void UsingDebugMode(string portName, string? portParameter, string viewMode)
+void UsingDebugMode(string portName, string portParameter, string viewMode)
 {
     var dataBlockSize = SerialPortHelper.GetBlockSize();
     var transInterval = SerialPortHelper.GetTransInterval();
@@ -273,7 +278,7 @@ void UsingDebugMode(string portName, string? portParameter, string viewMode)
     }
 }
 
-void UsingReceivingMode(string portName, string? portParameter, string fileToReceive)
+void UsingReceivingMode(string portName, string portParameter, string fileToReceive)
 {
     using var serialPortInstance = SerialPortHelper.Create(portName, portParameter);
 
@@ -284,7 +289,7 @@ void UsingReceivingMode(string portName, string? portParameter, string fileToRec
     {
         try
         {
-            Console.WriteLine("Listening...");
+            CConsole.Info("Listening...");
 
             // clear buffer
             serialPortInstance.DiscardInBuffer();
@@ -295,7 +300,7 @@ void UsingReceivingMode(string portName, string? portParameter, string fileToRec
         }
         catch (Exception e)
         {
-            Console.WriteLine(e.Message);
+            CConsole.Error(e.Message);
         }
 
         if (modeKeepOpen) continue;
@@ -303,14 +308,13 @@ void UsingReceivingMode(string portName, string? portParameter, string fileToRec
     }
 }
 
-void UsingSendingMode(string portName, string? portParameter, string fileToSend)
+void UsingSendingMode(string portName, string portParameter, string fileToSend)
 {
     try
     {
         using var serialPortInstance = SerialPortHelper.Create(portName, portParameter);
 
         PrintPortInfo(serialPortInstance);
-        Console.WriteLine("Sending...");
 
         serialPortInstance.Open();
 
@@ -324,7 +328,7 @@ void UsingSendingMode(string portName, string? portParameter, string fileToSend)
     }
     catch (Exception e)
     {
-        Console.WriteLine(e.Message);
+        CConsole.Error(e.Message);
     }
 }
 
@@ -355,6 +359,7 @@ void PrintBytesData(byte[] data, int maxWidth = 16, bool withText = false)
 
 void PrintPortInfo(SerialPort serialPort)
 {
+    Console.ForegroundColor = ConsoleColor.Cyan;
     Console.WriteLine("Using port {0} ({1}, {2}, {3}, {4}, {5} ms, {6} bytes)...",
         serialPort.PortName,
         serialPort.BaudRate,
@@ -363,6 +368,7 @@ void PrintPortInfo(SerialPort serialPort)
         serialPort.StopBits,
         SerialPortHelper.GetTransInterval(),
         SerialPortHelper.GetBlockSize());
+    Console.ResetColor();
 }
 
 void PrintUsage()
@@ -401,13 +407,11 @@ void PrintUsage()
     Console.WriteLine();
 
     Console.WriteLine("Options:");
-    Console.WriteLine("    --block-size=<size> | -b=<size>       Set block size (default: 256)");
-    Console.WriteLine("    --interval=<ms> | -i=<ms>             Set interval between blocks (default: 20)");
-    Console.WriteLine("    --parameter=<B,D,P,S> | -p=<B,D,P,S>  Set port parameter (default: 115200,8,N,1)");
+    Console.WriteLine("    --block-size=<size> | -b=<size>       Set block size (default: 1024)");
+    Console.WriteLine("    --interval=<ms> | -i=<ms>             Set interval between blocks (default: 0)");
+    Console.WriteLine("    --parameter=<B,D,P,S> | -p=<B,D,P,S>  Set port parameter (default: 460800,8,N,1)");
     Console.WriteLine("        B: BaudRate, Possible values are:");
-    Console.WriteLine("            110,  300,  600, 1200, 2400, 4800, 9600, 14400, 19200,");
-    Console.WriteLine("            28800, 38400, 56000, 57600, *115200, 128000, 256000");
-    Console.WriteLine("            *: recommended value");
+    Console.WriteLine("            115200, 230400, 460800, etc."); 
     Console.WriteLine("        D: DataBits, number of bits per byte, Possible values are:");
     Console.WriteLine("            5, 6, 7, 8");
     Console.WriteLine("        P: Parity, Possible values:");

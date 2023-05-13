@@ -13,6 +13,8 @@ public class Crc16Ccitt
     readonly ushort[] _table = new ushort[256];
     readonly ushort _initialValue = 0;
 
+    public static Crc16Ccitt SharedNonZero1 { get; } = new (InitialCrcValue.NonZero1);
+
     public Crc16Ccitt(InitialCrcValue initialValue)
     {
         this._initialValue = (ushort)initialValue;

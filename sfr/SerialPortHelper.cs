@@ -1,33 +1,13 @@
 using System.Diagnostics;
-using System.IO.Ports;
+using System.IO.Ports; 
 using System.Security.Cryptography;
 
 namespace sfr;
 
 public static class SerialPortHelper
-{
-    private static readonly byte[] FeedBack = { 0xBB };
-    private static readonly byte[] StopFlag = { 0xFF };
-    private static readonly byte[] ProtocolMismatch = { 0xF7 };
-    private static readonly byte[] Incomplete = { 0xF8 };
+{ 
 
-    private static int _blockSize = 1024;
-    private static readonly int FileInfoBlockSize = 512;
-
-    public static void SetBlockSize(int size)
-    {
-        if (size is < 128 or > 40960)
-            throw new Exception("Invalid block size `" + size + "`. Must be between 128 and 40960.");
-        _blockSize = size;
-    }
-
-    public static int GetBlockSize() => _blockSize;
-
-
-    private static int _transInterval; // ms
-    public static void SetTransInterval(int ms) => _transInterval = ms;
-    public static int GetTransInterval() => _transInterval;
-
+    public static int GetBlockSize() => Application.BlockSize;
 
     public static SerialPort Create(string portName, string parameter)
     {
@@ -61,162 +41,43 @@ public static class SerialPortHelper
         return new SerialPort(portName, baudRate, parity, dataBits, stopBits);
     }
 
-    private static void SendMetaInfo(SerialPort sp, string file)
+    private static Meta GetFileMetaInfo(string name, Stream fs)
     {
-        var fi = new FileInfo(file);
+        fs.Seek(0, SeekOrigin.Begin);
+        var sha1 = SHA1.HashDataAsync(fs).AsTask();
+        sha1.Wait(); 
 
-        var metaInfo = new MetaInfo
+        var meta = new FileMetaInfo
         {
-            Name = fi.Name,
-            Length = fi.Length,
-            Sha1 = SHA1.HashData(File.ReadAllBytes(file)),
-            BlockSize = _blockSize
-        };
+            FileName = name,
+            Length = fs.Length,
+            Sha1 = sha1.Result,
+            BlockSize = GetBlockSize(),
+            ProtocolId = Protocol.Ftp.Id,
+            BaseVersion = ProtocolBase.BaseVersion,
+        }.AsMeta();
 
-        var buffer = metaInfo.ToBytes().ToArray();
-
-        sp.Write(buffer, 0, buffer.Length);
+        fs.Seek(0, SeekOrigin.Begin);
+        return meta;
     }
 
-    private static MetaInfo? ReceiveMetaInfo(SerialPort sp)
-    {
-        sp.ReadTimeout = SerialPort.InfiniteTimeout;
-        while (sp.ReadByte() != 0xAA)
-        {
-        }
-
-        var buffer = new byte[FileInfoBlockSize];
-        buffer[0] = 0xAA;
-
-        var read = sp.ReadAtLeast(buffer, 1, buffer.Length - 1);
-        if (read < buffer.Length - 1) return null;
-
-        var metaInfo = MetaInfo.BytesBuilder.GetMetaInfo(buffer);
-
-        return metaInfo;
-    }
-
-
-    private static void SendFileData(SerialPort sp, string file, bool showDetail = false)
-    {
-        using var fs = File.OpenRead(file);
-        var buffer = new byte[_blockSize];
-        int read;
-        var totalRead = 0L;
-        int head;
-        var sw = new Stopwatch();
-        sw.Start();
-        while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
-        {
-            totalRead += read;
-
-            // Send data block
-            sp.Write(buffer, 0, buffer.Length);
-
-            if (showDetail) CConsole.Log(Convert.ToHexString(buffer, 0, read));
-
-            // calculate speed
-            var speed = totalRead / 1024f * 1000 / sw.ElapsedMilliseconds; // KB/s
-
-            // calculate remaining time
-            var remaining = (fs.Length - totalRead) / 1024f; // KB
-            var remainingTime = remaining / speed; // seconds 
-
-            // print progress
-            Console.SetCursorPosition(0, Console.CursorTop);
-            Console.Write(
-                $"\r{totalRead}/{fs.Length} {totalRead * 100 / fs.Length}% at {speed:F1} KB/s, remaining {remainingTime:F1} s.");
-
-            if (_transInterval > 0) Task.Delay(_transInterval).Wait();
-
-            var retry = 0;
-            while ((head = sp.ReadByte()) != (int)ByteFlag.Continue)
-            {
-                if (head == (int)ByteFlag.Incomplete)
-                {
-                    if (retry > 20) throw new Exception("Too many retries.");
-                     
-                    CConsole.Warn($"\nBlock retransmitting requested...{++retry}"); 
-                    
-                    // block transfer incomplete, retry
-                    sp.DiscardOutBuffer();
-                    sp.Write(buffer, 0, buffer.Length);
-                }
-                else
-                {
-                    throw new Exception(MetaInfo.GetErrorMessage((byte)head));
-                }
-            }
-        }
-
-        sw.Stop();
-    }
-
-    private static string ReceiveFileData(SerialPort sp, string dir, MetaInfo meta, bool showDetail = false)
-    {
-        var filePathName = Path.Combine(dir, meta.Name);
-        using var fs = File.Create(filePathName);
-        var buffer = new byte[_blockSize];
-        int read;
-        var totalRead = 0L;
-
-        var retry = 0;
-        while ((read = sp.ReadAtLeast(buffer, 0, buffer.Length)) > 0)
-        {
-            if (showDetail) Console.WriteLine(Convert.ToHexString(buffer, 0, read));
-
-            if (read != _blockSize)
-            {
-                CConsole.Warn("\nData block incomplete warning:");
-                CConsole.Warn($" - Block size mismatch. Expected: {_blockSize}, received: {read}");
-                CConsole.Warn($" - Waiting for retransmission...{++retry} retry.");
-                sp.Write(Incomplete, 0, 1);
-                
-                // retry this block
-                continue;
-            }
-
-            totalRead += read;
-            if (totalRead > meta.Length) totalRead = meta.Length;
-
-            fs.Write(buffer, 0, read);
-
-            if (!showDetail)
-            {
-                // print progress
-                Console.SetCursorPosition(0, Console.CursorTop);
-                Console.Write($"{totalRead}/{meta.Length} {totalRead * 100 / meta.Length}%");
-            }
-
-            Task.Delay(_transInterval).Wait();
-            sp.Write(FeedBack, 0, 1);
-
-            if (totalRead < meta.Length) continue;
-
-            break;
-        }
-
-        // drop padding bytes
-        fs.SetLength(meta.Length);
-        fs.Flush();
-        fs.Close();
-        if (retry > 5)
-        {
-            CConsole.Warn("\nToo many incomplete retries. Consider using a lower baud rate.");
-        }
-
-        return filePathName;
-    }
-
-
-    public static void SendFile(SerialPort sp, string file, bool showDetail = false)
+    public static void SendFile(SerialPort sp)
     {
         sp.DiscardOutBuffer();
         sp.DiscardInBuffer();
 
-        SendMetaInfo(sp, file);
+        var protocol = Protocol.GetProtocol(Application.ProtocolId) ?? Protocol.Ftp;
 
-        Task.Delay(50).Wait();
+        var file = Application.FileName;
+
+        using var fs = File.OpenRead(file);
+
+        var meta = GetFileMetaInfo(Path.GetFileName(file), fs);
+
+
+        var bytes = meta.GetBytes();
+        // send file meta info
+        sp.Write(bytes.ToArray(), 0, bytes.Length);
 
         CConsole.Info("\nFile info sent. Waiting for response...");
 
@@ -224,103 +85,77 @@ public static class SerialPortHelper
 
         if (head != 0xBB)
         {
-            CConsole.Error("\nError sending file: " + head.ToString("X"));
+            CConsole.Error("\nError sending file: " + Flag.GetErrorMessage((byte)head));
             return;
-        }
+        } 
 
-        Task.Delay(50).Wait();
+        CConsole.Ok("\nConfirmed. Send file data...");
 
-        CConsole.Ok("\nConfirmed. Ready to send file data...");
-        SendFileData(sp, file, showDetail);
+        protocol.Send(sp, ref meta, fs);
 
         CConsole.Ok("\nFile sent successfully.");
     }
 
-    public static void ReceiveFile(SerialPort sp, string dir, bool showDetail = false)
+
+    private static Meta ReceiveMetaData(SerialPort sp)
     {
-        var d = Directory.CreateDirectory(dir);
-        var metaInfo = ReceiveMetaInfo(sp);
-
-        if (metaInfo == null)
+        sp.ReadTimeout = SerialPort.InfiniteTimeout;
+        while (sp.ReadByte() != (int)ByteFlag.Head)
         {
-            Console.WriteLine("Error receiving file.");
-            sp.Write(StopFlag, 0, 1);
-            return;
         }
 
-        if (metaInfo.ProtocolVersion != Protocol.ProtocolVersion)
-        {
-            CConsole.Error(
-                $"Protocol version mismatch. Expected: {Protocol.ProtocolVersion:X}, received: {metaInfo.ProtocolVersion:X}");
+        var buffer = new byte[Meta.StructSize];
+        buffer[0] = (int)ByteFlag.Head;
 
-            sp.Write(ProtocolMismatch, 0, 1);
-            return;
+        var read = sp.ReadAtLeast(buffer, 1, buffer.Length - 1);
+
+        if (read < buffer.Length - 1)
+        {
+            throw new Exception("Incomplete meta info.");
         }
 
-        if (_blockSize != metaInfo.BlockSize)
-        {
-            CConsole.Warn(
-                $"   Warning: block size mismatch. Current: {_blockSize}, received: {metaInfo.BlockSize}.");
-            CConsole.Warn($"Change block size to {metaInfo.BlockSize} !");
+        var metaInfo = Meta.FromBytes(buffer);
 
-            _blockSize = metaInfo.BlockSize;
+        return metaInfo;
+    }
+
+    public static void Receive(SerialPort sp )
+    { 
+        Meta meta;
+        try
+        {
+            meta = ReceiveMetaData(sp);
+            meta.Print();
+            meta.CheckCrc16();
+        }
+        catch
+        {
+            ProtocolBase.StreamStopBy(sp);
+            throw;
         }
 
-        if (string.IsNullOrWhiteSpace(metaInfo.Name))
-        {
-            sp.Write(StopFlag, 0, 1);
-            Console.WriteLine("Empty file name.");
-            return;
-        }
-
-        // check file name
-        var invalidChars = Path.GetInvalidFileNameChars();
-        if (metaInfo.Name.IndexOfAny(invalidChars) >= 0)
-        {
-            sp.Write(StopFlag, 0, 1);
-            Console.WriteLine("Invalid file name.");
-            return;
-        }
-
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine($">> {DateTime.Now:HH:mm:ss} Ready to receive file:");
-        Console.WriteLine(
-            "  - Name: {0}\n  - Size: {1} B\n  - Sign: {2}",
-            metaInfo.Name,
-            metaInfo.Length,
-            Convert.ToHexString(metaInfo.Sha1)
-        );
-        Console.ResetColor();
-
-        Task.Delay(50).Wait();
-        sp.DiscardInBuffer();
-
-        sp.Write(FeedBack, 0, 1);
-        Task.Delay(50).Wait();
-
-        var sw = new Stopwatch();
-        Console.WriteLine(">> Receiving...");
-        sw.Start();
-        var f = ReceiveFileData(sp, d.FullName, metaInfo, showDetail);
-        sw.Stop();
-        Console.WriteLine(
-            "\nReceived in {0} s, at {1:F2} KB/s",
-            sw.ElapsedMilliseconds / 1000f, (metaInfo.Length / 1024f / sw.ElapsedMilliseconds * 1000f));
-
-        var sha1 = SHA1.HashData(File.ReadAllBytes(f));
-
-        var isMatch = sha1.SequenceEqual(metaInfo.Sha1);
-
-        if (isMatch)
-        {
-            CConsole.Ok("SHA1 matched. File received successfully.");
-        }
-        else
+        if (meta.BaseVersion != ProtocolBase.BaseVersion)
         {
             CConsole.Error(
-                $"SHA1 mismatch. File received with error. Expected: {Convert.ToHexString(metaInfo.Sha1)}, received: {Convert.ToHexString(sha1)}");
+                $"Basic protocol version mismatch. Expected: {ProtocolBase.BaseVersion:X}, received: {meta.BaseVersion:X}");
+
+            ProtocolBase.StreamProtocolMismatch(sp);
+            return;
         }
+
+        if (!Protocol.TryGetProtocol(meta.Protocol, out var protocol))
+        {
+            CConsole.Error($"Unsupported protocol: {meta.Protocol:X}");
+
+            ProtocolBase.StreamProtocolNotSupported(sp);
+            return;
+        }
+
+        CConsole.Ok(">> Receiving..."); 
+
+        protocol?.Receive(sp, ref meta);
 
         Console.WriteLine();
     }
+
 }

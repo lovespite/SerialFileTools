@@ -1,0 +1,1 @@
+dotnet build sfr -c Release --self-contained -o ~/Desktop/SfTools

@@ -1,14 +1,23 @@
-﻿using System.Diagnostics;
+﻿global using ControlledStreamProtocol;
+
+using System.Diagnostics;
 using System.IO.Ports;
+using System.Reflection;
 using System.Text;
+using ConsoleExtension;
+using ControlledStreamProtocol.Extensions;
+using ControlledStreamProtocol.Static;
+
 using sfr;
 
-CConsole.Low("SFR - Serial File Receiver v2.1.0");
+
+CConsole.Low("SFR - Serial File Receiver v2.2.0");
 CConsole.Low("CopyRight (C) 2023, by Lovespite.");
 CConsole.Low("Protocol version: " + ProtocolBase.BaseVersion.ToString("X"));
 CConsole.Low(Environment.OSVersion.ToString());
 CConsole.Low("---------------------------------");
-
+CConsole.Low("Loading protocols...");
+Protocol.LoadProtocolsFromAssembly(Assembly.GetExecutingAssembly());
 
 if (args.Length < 1 || args.Contains("--help") || args.Contains("-h"))
 {
@@ -165,7 +174,7 @@ void HandleDebugReceiving(SerialPort serialPortInstance, Stream? fs)
                 switch (Application.DebugView)
                 {
                     case DebugViewMode.Hex:
-                        PrintBytesData(ms.ToArray());
+                        PrintBytesData(ms.ToArray(), 16, true);
                         break;
                     case DebugViewMode.Text:
                         Console.Write(Application.TextEncoding.GetString(ms.ToArray()));
@@ -253,29 +262,24 @@ void UsingDebugMode()
 void UsingReceivingMode()
 {
     using var serialPortInstance = SerialPortHelper.Create(Application.PortName, Application.PortParameter);
-
     PrintPortInfo(serialPortInstance);
 
     CConsole.Info("Receiving to \n - Directory: [" + Application.OutputDirectory + "]");
 
-    serialPortInstance.Open();
     while (true)
     {
         try
         {
             CConsole.Info("Listening...");
 
-            // clear buffer
-            serialPortInstance.DiscardInBuffer();
-            serialPortInstance.DiscardOutBuffer();
-
             // receive file
             SerialPortHelper.Receive(serialPortInstance);
         }
         catch (Exception e)
         {
+            Console.WriteLine();
             CConsole.Error(e.Message);
-            if(e.StackTrace is not null) CConsole.Low(e.StackTrace);
+            if (e.StackTrace is not null) CConsole.Low(e.StackTrace);
         }
 
         if (Application.KeepOpen) continue;
@@ -284,29 +288,27 @@ void UsingReceivingMode()
 }
 
 void UsingSendingMode()
-{
+{        
+    using var serialPortInstance = SerialPortHelper.Create(Application.PortName, Application.PortParameter);
+    
     try
     {
-        using var serialPortInstance = SerialPortHelper.Create(Application.PortName, Application.PortParameter);
-
         PrintPortInfo(serialPortInstance);
-
-        CConsole.Info("Sending: \n - File: [" + Path.GetFileName(Application.FileName) + "]");
 
         serialPortInstance.Open();
 
-        // clear buffer
-        serialPortInstance.DiscardInBuffer();
-        serialPortInstance.DiscardOutBuffer();
+        CConsole.Info(">> Streaming... \n - File: [" + Path.GetFileName(Application.FileName) + "]");
 
         SerialPortHelper.SendFile(serialPortInstance);
-
-        serialPortInstance.Close();
     }
     catch (Exception e)
     {
         CConsole.Error(e.Message);
         if (e.StackTrace is not null) CConsole.Low(e.StackTrace);
+    }
+    finally
+    {
+        serialPortInstance.Close();
     }
 }
 

@@ -1,12 +1,14 @@
-using System.Diagnostics;
-using System.IO.Ports; 
+using System.IO.Ports;
 using System.Security.Cryptography;
+using ConsoleExtension;
+using ControlledStreamProtocol.Exceptions;
+using ControlledStreamProtocol.Extensions;
+using ControlledStreamProtocol.Static;
 
 namespace sfr;
 
 public static class SerialPortHelper
-{ 
-
+{
     public static int GetBlockSize() => Application.BlockSize;
 
     public static SerialPort Create(string portName, string parameter)
@@ -45,7 +47,7 @@ public static class SerialPortHelper
     {
         fs.Seek(0, SeekOrigin.Begin);
         var sha1 = SHA1.HashDataAsync(fs).AsTask();
-        sha1.Wait(); 
+        sha1.Wait();
 
         var meta = new FileMetaInfo
         {
@@ -53,7 +55,7 @@ public static class SerialPortHelper
             Length = fs.Length,
             Sha1 = sha1.Result,
             BlockSize = GetBlockSize(),
-            ProtocolId = Protocol.Ftp.Id,
+            ProtocolId = 0,
             BaseVersion = ProtocolBase.BaseVersion,
         }.AsMeta();
 
@@ -62,18 +64,16 @@ public static class SerialPortHelper
     }
 
     public static void SendFile(SerialPort sp)
-    {
+    { 
         sp.DiscardOutBuffer();
-        sp.DiscardInBuffer();
-
-        var protocol = Protocol.GetProtocol(Application.ProtocolId) ?? Protocol.Ftp;
+        sp.DiscardInBuffer(); 
 
         var file = Application.FileName;
 
         using var fs = File.OpenRead(file);
 
         var meta = GetFileMetaInfo(Path.GetFileName(file), fs);
-
+        Protocol.Create(Protocol.Sftp.Name, sp, ref meta, out var protocol);
 
         var bytes = meta.GetBytes();
         // send file meta info
@@ -87,18 +87,18 @@ public static class SerialPortHelper
         {
             CConsole.Error("\nError sending file: " + Flag.GetErrorMessage((byte)head));
             return;
-        } 
+        }
 
         CConsole.Ok("\nConfirmed. Send file data...");
 
-        protocol.Send(sp, ref meta, fs);
+        protocol.Send(fs);
 
         CConsole.Ok("\nFile sent successfully.");
     }
 
 
     private static Meta ReceiveMetaData(SerialPort sp)
-    {
+    { 
         sp.ReadTimeout = SerialPort.InfiniteTimeout;
         while (sp.ReadByte() != (int)ByteFlag.Head)
         {
@@ -107,7 +107,7 @@ public static class SerialPortHelper
         var buffer = new byte[Meta.StructSize];
         buffer[0] = (int)ByteFlag.Head;
 
-        var read = sp.ReadAtLeast(buffer, 1, buffer.Length - 1);
+        var read = sp.ReadAtLeast(buffer, 1, buffer.Length - 1); 
 
         if (read < buffer.Length - 1)
         {
@@ -119,43 +119,47 @@ public static class SerialPortHelper
         return metaInfo;
     }
 
-    public static void Receive(SerialPort sp )
-    { 
-        Meta meta;
+    public static void Receive(SerialPort sp)
+    {
         try
         {
-            meta = ReceiveMetaData(sp);
+            sp.Open();
+            
+            var meta = ReceiveMetaData(sp);
             meta.Print();
             meta.CheckCrc16();
+
+            ProtocolBase.CheckBaseVersion(ref meta);
+
+            Protocol.Create(ref meta, sp, out var protocol);
+
+            CConsole.Ok(">> Streaming...");
+            protocol.Receive();
+            Console.WriteLine();
         }
-        catch
+        catch (ProtocolBaseVersionNotMatchException)
         {
-            ProtocolBase.StreamStopBy(sp);
+            ProtocolBase.StreamFeedProtocolMismatch(sp);
             throw;
         }
-
-        if (meta.BaseVersion != ProtocolBase.BaseVersion)
+        catch (ProtocolNotImplementedException)
         {
-            CConsole.Error(
-                $"Basic protocol version mismatch. Expected: {ProtocolBase.BaseVersion:X}, received: {meta.BaseVersion:X}");
-
-            ProtocolBase.StreamProtocolMismatch(sp);
-            return;
+            ProtocolBase.StreamFeedProtocolNotSupported(sp);
+            throw;
         }
-
-        if (!Protocol.TryGetProtocol(meta.Protocol, out var protocol))
+        catch (ProtocolInitializationException)
         {
-            CConsole.Error($"Unsupported protocol: {meta.Protocol:X}");
-
-            ProtocolBase.StreamProtocolNotSupported(sp);
-            return;
+            ProtocolBase.StreamStop(sp);
+            throw;
         }
-
-        CConsole.Ok(">> Receiving..."); 
-
-        protocol?.Receive(sp, ref meta);
-
-        Console.WriteLine();
+        catch (Exception)
+        {
+            ProtocolBase.StreamStop(sp);
+            throw;
+        }
+        finally
+        {
+            sp.Close();
+        }
     }
-
 }

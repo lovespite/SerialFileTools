@@ -1,4 +1,4 @@
-namespace sfr;
+namespace ControlledStreamProtocol;
 
 public enum ByteFlag
 {
@@ -17,7 +17,7 @@ public static class Flag
         return signal switch
         {
             (byte)ByteFlag.Continue => "Continue.",
-            (byte)ByteFlag.StopBy => "Stopped by the other side. File info in metadata is invalid.",
+            (byte)ByteFlag.StopBy => "Stopped by the other side.",
             (byte)ByteFlag.Incomplete => "Incomplete data block.",
             (byte)ByteFlag.ProtocolMismatch => "Protocol mismatch. The other side is using a different protocol.",
             (byte)ByteFlag.ProtocolNotSupported => "Protocol not supported.",

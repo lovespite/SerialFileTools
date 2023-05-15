@@ -1,4 +1,4 @@
-namespace sfr;
+namespace Crc16;
 
 public enum InitialCrcValue
 {

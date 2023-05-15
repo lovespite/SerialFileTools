@@ -1,5 +1,7 @@
 using System.IO.Ports; 
 using System.Text;
+using ConsoleExtension;
+using ControlledStreamProtocol.Static;
 
 namespace sfr;
 
@@ -88,7 +90,7 @@ public static class Application
         }
     }
     
-    public static ushort ProtocolId { get; set; } = Protocol.Ftp.Id;
+    public static ushort ProtocolId { get; set; } = Protocol.Sftp.Id;
 
     public static string OutputDirectory { get; set; } = string.Empty;
 

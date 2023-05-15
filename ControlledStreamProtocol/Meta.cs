@@ -1,7 +1,8 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using Crc16;
 
-namespace sfr;
+namespace ControlledStreamProtocol;
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct Meta
@@ -131,17 +132,19 @@ public struct Meta
 
     public void Print()
     {
-        var p = sfr.Protocol.GetProtocol(Protocol);
+        var p = Static.Protocol.GetProtocol(Protocol);
         Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($">> Meta received:");
         Console.WriteLine($"  -           Head: {Head:X2}");
         Console.WriteLine($"  -     DataLength: {DataLength}");
         Console.WriteLine($"  -       CodePage: {CodePage}, {Encoding.GetEncoding(CodePage).EncodingName}");
         Console.WriteLine($"  -         Length: {Length}");
         Console.WriteLine($"  -      BlockSize: {BlockSize}");
-        Console.WriteLine($"  - SignatureBlock: {Convert.ToHexString(SignatureBlock)}");
+        Console.WriteLine($"  -          Block: {Convert.ToHexString(SignatureBlock)}");
         Console.WriteLine($"  -       Reserved: {Convert.ToHexString(Reserved)}");
         Console.WriteLine($"  -    BaseVersion: {BaseVersion}");
-        Console.WriteLine($"  -       Protocol: {Protocol}, {p?.Name}");
+        Console.WriteLine($"  -       Protocol: {Protocol:X}");
+        Console.WriteLine($"                    {p?.Name}");
         Console.WriteLine($"                    {p?.DisplayName}");
         Console.WriteLine($"  -      DataBytes: {this}");
         Console.WriteLine($"  -          Crc16: {Crc16:X4}");

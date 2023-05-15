@@ -1,4 +1,4 @@
-namespace sfr;
+namespace ConsoleExtension;
 
 public static class CConsole
 {

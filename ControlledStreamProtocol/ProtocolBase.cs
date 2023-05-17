@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using ControlledStreamProtocol.Exceptions;
 using ControlledStreamProtocol.PortStream;
+using ControlledStreamProtocol.Static;
 
 namespace ControlledStreamProtocol;
 
@@ -32,6 +33,13 @@ public abstract class ProtocolBase : IDisposable
         StreamMeta = meta;
     }
 
+    public void Bind(IControlledPortStream port)
+    {
+        if (Port is not null) Release();
+
+        Port = port;
+    }
+
     private void Release()
     {
         Port = null;
@@ -40,10 +48,13 @@ public abstract class ProtocolBase : IDisposable
     private void CheckPort()
     {
         if (Port is null) throw new NullReferenceException("Port is not bound.");
+        if (!Port.IsOpen) Port.Open();
     }
 
     private Stopwatch _stopwatch = new();
     protected long TimeElapsed => _stopwatch.ElapsedMilliseconds;
+
+    public abstract byte SignalHeader { get; }
 
     public abstract string Name { get; }
     public abstract ushort Id { get; }
@@ -57,7 +68,7 @@ public abstract class ProtocolBase : IDisposable
     protected abstract long ProcessDataStreamIn(Stream stream, ReadOnlyMemory<byte> data);
     protected abstract void AfterStreamingIn(Stream stream);
 
-    public void Receive()
+    public virtual void Receive()
     {
         CheckPort();
 
@@ -93,26 +104,24 @@ public abstract class ProtocolBase : IDisposable
 
     #region Sending Stream
 
-    protected delegate void SendBlock(ReadOnlyMemory<byte> data);
-
-    protected delegate int WaitResponse(byte[] buffer, int msTimeout = 1000);
-
-    protected delegate ByteFlag WaitFlag(int msTimeout = 1000);
-
-
     // send
+    protected virtual Meta BuildMeta() => Meta.Empty();
+
     protected abstract Stream OpenStreamOut();
-    // protected abstract void ProcessDataStreamOut(Stream stream);
 
     protected abstract void ProcessDataStreamOut(Stream stream);
 
     protected abstract void AfterStreamingOut(Stream stream);
 
-    public void Send()
+    public virtual void Host()
     {
         CheckPort();
         Debug.Assert(Port is not null);
         Debug.Assert(Port.IsOpen);
+
+        StreamMeta = BuildMeta();
+
+        if (!StreamMeta.IsEmpty) StreamWriteBlock(StreamMeta);
 
         using var stream = OpenStreamOut();
         _stopwatch = Stopwatch.StartNew();
@@ -157,28 +166,28 @@ public abstract class ProtocolBase : IDisposable
         }
     }
 
-    protected void StreamContinue()
+    protected virtual void StreamContinue()
     {
         CanStreamBeControlled();
         StreamContinue(Port!);
         SetStreamFlag();
     }
 
-    protected void StreamRetry()
+    protected virtual void StreamRetry()
     {
         CanStreamBeControlled();
         StreamRetry(Port!);
         SetStreamFlag();
     }
 
-    protected void StreamStop()
+    protected virtual void StreamStop()
     {
         CanStreamBeControlled();
         StreamStop(Port!);
         SetStreamFlag();
     }
 
-    protected ByteFlag StreamWaitForFlag(int msTimeout = 1000)
+    protected virtual ByteFlag StreamWaitForFlag(int msTimeout = 1000)
     {
         Port!.ReadTimeout = msTimeout;
         var flagByte = Port!.ReadByte();
@@ -186,17 +195,22 @@ public abstract class ProtocolBase : IDisposable
         return (ByteFlag)flagByte;
     }
 
-    protected int StreamWaitForResponse(byte[] buffer, int msTimeout = 3000)
+    protected virtual int StreamWaitForResponse(byte[] buffer, int msTimeout = 200)
     {
         var read = Port!.ReadAtLeast(buffer, msTimeout);
         return read;
     }
 
-    protected void StreamSendBlock(ReadOnlyMemory<byte> block)
+    protected void StreamWrite(ReadOnlyMemory<byte> buffer)
+    {
+        Port!.Write(buffer);
+    }
+
+    protected virtual void StreamWriteBlock(ReadOnlyMemory<byte> block)
     {
         if (block.Length != StreamMeta.BlockSize)
             throw new ArgumentOutOfRangeException(nameof(block), block.Length, null);
-        Port!.Write(block);
+        StreamWrite(block);
     }
 
     #endregion
@@ -235,6 +249,32 @@ public abstract class ProtocolBase : IDisposable
     public static void StreamFeedProtocolNotSupported(IControlledPortStream port)
     {
         port.Write(ProtocolNotSupported);
+    }
+
+    public static ProtocolBase GetProtocol(IControlledPortStream cps, byte metaHead)
+    {
+        cps.ReadTimeout = IControlledPortStream.InfiniteTimeout;
+        while (cps.ReadByte() != metaHead)
+        {
+        }
+
+        var buffer = new byte[Meta.StructSize];
+        buffer[0] = metaHead;
+
+        var read = cps.ReadAtLeast(buffer, 1, buffer.Length - 1);
+
+        if (read < buffer.Length - 1)
+        {
+            throw new Exception("Incomplete meta info.");
+        }
+
+        var metaInfo = Meta.FromBytes(buffer);
+
+        metaInfo.Print();
+        metaInfo.CheckCrc16();
+        CheckBaseVersion(ref metaInfo);
+
+        return Protocol.Create(ref metaInfo, cps);
     }
 
     #endregion

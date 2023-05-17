@@ -25,6 +25,8 @@ public class SyncPortStream : IControlledPortStream
             "1x" => BaseBaudRate,
             "2x" => BaseBaudRate * 2,
             "4x" => BaseBaudRate * 4,
+            "8x" => BaseBaudRate * 8,
+            "16x" => BaseBaudRate * 16,
             _ => int.Parse(parts[0]),
         };
 
@@ -130,7 +132,7 @@ public class SyncPortStream : IControlledPortStream
         _port.Write(buffer.ToArray(), 0, buffer.Length);
     }
 
-    public int ReadAtLeast(byte[] buffer, int offset, int count, int msTimeout = 1000)
+    public int ReadAtLeast(byte[] buffer, int offset, int count, int msTimeout = 200)
     {
         var start = DateTime.Now;
         var read = 0;
@@ -160,9 +162,9 @@ public class SyncPortStream : IControlledPortStream
         return read;
     }
 
-    public int ReadAtLeast(byte[] buffer, int msTimeout = 1000)
+    public int ReadAtLeast(byte[] buffer, int msTimeout = 200)
     {
-        return ReadAtLeast(buffer, 0, buffer.Length);
+        return ReadAtLeast(buffer, 0, buffer.Length, msTimeout);
     }
 
     public int Read(byte[] buffer, int offset, int count)

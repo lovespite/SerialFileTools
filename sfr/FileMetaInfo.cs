@@ -22,21 +22,5 @@ public class FileMetaInfo
         );
         meta.SetStringData(FileName, Encoding.UTF8);
         return meta;
-    }
-
-    public static class Builder
-    {
-        public static FileMetaInfo GetMetaInfo(ref Meta meta)
-        {
-            return new FileMetaInfo
-            {
-                FileName = meta.GetStringData().Trim(),
-                Length = meta.Length,
-                BlockSize = meta.BlockSize,
-                Sha1 = meta.SignatureBlock.ToArray(),
-                ProtocolId = meta.Protocol,
-                BaseVersion = meta.BaseVersion
-            };
-        }
-    }
+    } 
 }

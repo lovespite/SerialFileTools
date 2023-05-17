@@ -18,8 +18,8 @@ public interface IControlledPortStream: IDisposable
     
     public const int InfiniteTimeout = -1;
     
-    public int ReadAtLeast(byte[] buffer, int offset, int count, int msTimeout = 1000);
-    public int ReadAtLeast(byte[] buffer, int msTimeout = 1000);
+    public int ReadAtLeast(byte[] buffer, int offset, int count, int msTimeout = 200);
+    public int ReadAtLeast(byte[] buffer, int msTimeout = 200);
     public int Read(byte[] buffer, int offset, int count);
     public int Read(byte[] buffer);
     

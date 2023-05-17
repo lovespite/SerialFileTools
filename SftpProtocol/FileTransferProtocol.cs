@@ -9,9 +9,12 @@ namespace SftpProtocol;
 // ReSharper disable once ClassNeverInstantiated.Global
 public class FileTransferProtocol : ProtocolBase
 {
+    public override byte SignalHeader => (byte)ByteFlag.Head;
+
+    private const int BlockSize = 2048;
     public override string Name => "SFTP";
     public override ushort Id => 0x1000;
-    public override string DisplayName => "Simple File Transfer Protocol v1.0";
+    public override string DisplayName => "Simple File Transfer Protocol v1.1";
 
     private string _fileName = string.Empty;
 
@@ -90,21 +93,43 @@ public class FileTransferProtocol : ProtocolBase
 
         stream.Seek(0, SeekOrigin.Begin);
 
-        var sha1 = SHA1.HashDataAsync(stream).AsTask();
+        var sha1 = SHA1.HashData(stream);
 
-        var isMatch = sha1.Result.SequenceEqual(StreamMeta.SignatureBlock);
+        var isMatch = sha1.SequenceEqual(StreamMeta.SignatureBlock);
 
         if (isMatch)
         {
             Logger.Ok("\nFile received successfully.");
             Logger.Info("  - File: " + _fileName);
+            Logger.Info("  - SHA1: " + Convert.ToHexString(sha1));
         }
         else
         {
             Logger.Error("\nFile received with error:");
             Logger.Warn($"  - SHA1 Expected: {Convert.ToHexString(StreamMeta.SignatureBlock)}");
-            Logger.Warn($"  -      Received: {Convert.ToHexString(sha1.Result)}");
+            Logger.Warn($"  -      Received: {Convert.ToHexString(sha1)}");
         }
+    }
+
+    protected override Meta BuildMeta()
+    {
+        var file = GetFileName();
+        if (!File.Exists(file)) throw new FileNotFoundException(file);
+
+        using var fs = File.OpenRead(file);
+        var fLen = fs.Length;
+        var sha1 = SHA1.HashData(fs);
+        fs.Close();
+
+        var meta = new Meta(fLen, BlockSize, sha1, Id);
+        meta.SetStringData(Path.GetFileName(file));
+
+        return meta;
+    }
+
+    protected override void StreamWriteBlock(ReadOnlyMemory<byte> block)
+    {
+        StreamWrite(block);
     }
 
     protected override Stream OpenStreamOut()
@@ -114,7 +139,7 @@ public class FileTransferProtocol : ProtocolBase
         var f = StreamWaitForFlag();
 
         if (f != ByteFlag.Continue)
-        { 
+        {
             throw new Exception("Error: " + Flag.GetErrorMessage(f));
         }
 
@@ -136,17 +161,17 @@ public class FileTransferProtocol : ProtocolBase
             totalRead += read;
 
             // send data block
-            StreamSendBlock(buffer);
+            StreamWriteBlock(buffer);
 
             var retry = 0;
             do
             {
-                var flag = StreamWaitForFlag();
+                var flag = StreamWaitForFlag(-1);
                 if (flag == ByteFlag.Continue) break;
                 if (flag == ByteFlag.Incomplete)
                 {
                     // block transfer incomplete, retry
-                    StreamSendBlock(buffer);
+                    StreamWriteBlock(buffer);
                     if (retry == 0) Console.Write("\n");
                     Logger.Warn($"Block retransmitting requested...{++retry}");
                 }

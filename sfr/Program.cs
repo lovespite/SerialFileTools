@@ -8,7 +8,7 @@ using ControlledStreamProtocol.PortStream;
 using ControlledStreamProtocol.Static;
 using sfr;
 
-Logger.Low("SFR - Serial File Receiver v2.2.0");
+Logger.Low("SFR - Serial File Receiver v2.4.0");
 Logger.Low("CopyRight (C) 2023, by Lovespite.");
 Logger.Low("Protocol version: " + ProtocolBase.BaseVersion.ToString("X"));
 Logger.Low("Platform: " + Environment.OSVersion);
@@ -97,7 +97,7 @@ else
 
 void HandleDebugReceiving(IControlledPortStream cps, Stream? fs)
 {
-    var dataBlockSize = SerialPortHelper.GetBlockSize();
+    var dataBlockSize = Application.BlockSize;
     var maxDataBfSize = dataBlockSize * 12;
     var ms = fs is null ? new MemoryStream(maxDataBfSize) : null;
 
@@ -165,7 +165,7 @@ void HandleDebugReceiving(IControlledPortStream cps, Stream? fs)
 
 void UsingDebugMode()
 {
-    var dataBlockSize = SerialPortHelper.GetBlockSize();
+    var dataBlockSize = Application.BlockSize;
     using Stream? fs = Application.Redirect is null ? null : File.Create(Application.Redirect);
     using var cps = SerialPortHelper.Create(Application.PortName, Application.PortParameter);
 

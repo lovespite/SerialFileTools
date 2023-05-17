@@ -109,6 +109,20 @@ public static class Protocol
         Console.WriteLine();
 
         Protocols.Add(p.Id, p);
+    } 
+
+    public static ProtocolBase Create(ref Meta meta, IControlledPortStream sp )
+    {
+        Create(meta.Protocol, out var newProtocol);
+        newProtocol.Bind(sp, ref meta);
+        return newProtocol;
+    }
+
+    public static ProtocolBase Create(string name, IControlledPortStream sp)
+    {
+        Create(name, out var newProtocol); 
+        newProtocol.Bind(sp);
+        return newProtocol;
     }
 
     public static ProtocolBase? GetProtocol(ushort protocolId)
@@ -121,28 +135,15 @@ public static class Protocol
         return Protocols.Values.FirstOrDefault(p => p.Name == name);
     }
 
-    public static bool TryGetProtocol(ushort protocolId, out ProtocolBase? protocol)
+    private static bool TryGetProtocol(ushort protocolId, out ProtocolBase? protocol)
     {
         return Protocols.TryGetValue(protocolId, out protocol);
     }
 
-    public static bool TryGetProtocol(string name, out ProtocolBase? protocol)
+    private static bool TryGetProtocol(string name, out ProtocolBase? protocol)
     {
         protocol = Protocols.Values.FirstOrDefault(p => p.Name.Equals(name));
         return protocol is not null;
-    }
-
-    public static void Create(ref Meta meta, IControlledPortStream sp, out ProtocolBase newProtocol)
-    {
-        Create(meta.Protocol, out newProtocol);
-        newProtocol.Bind(sp, ref meta);
-    }
-
-    public static void Create(string name, IControlledPortStream sp, ref Meta meta, out ProtocolBase newProtocol)
-    {
-        Create(name, out newProtocol);
-        meta.Protocol = newProtocol.Id;
-        newProtocol.Bind(sp, ref meta);
     }
 
     private static void Create(ushort protocolId, out ProtocolBase newProtocol)

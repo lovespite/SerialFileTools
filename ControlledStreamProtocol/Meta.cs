@@ -10,6 +10,9 @@ public struct Meta
 {
     public static int StructSize => Marshal.SizeOf<Meta>();
 
+    public static Meta Empty() => new() { Head = 0x00 };
+    public bool IsEmpty => Head == 0x00;
+
     public static Meta FromBytes(ReadOnlyMemory<byte> bytes)
     {
         if (bytes.Length != StructSize)

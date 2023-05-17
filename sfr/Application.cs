@@ -236,6 +236,7 @@ public static class Application
         Console.WriteLine("Usage (debug mode):");
         Console.WriteLine("    sfr <PORT> <--debug | -D> [options]");
         Console.WriteLine("    Debug Options:");
+        Console.WriteLine("        --block-size=<size> | -b=<size> Set block size (default: 2048)");
         Console.WriteLine("        --debug-view=<text|hex|both> | -V=<text|hex|both>");
         Console.WriteLine("            Default: both");
         Console.WriteLine("        --text-encoding=<encoding> | -E=<encoding>");
@@ -252,7 +253,6 @@ public static class Application
         Console.WriteLine();
 
         Console.WriteLine("Options:");
-        Console.WriteLine("    --block-size=<size> | -b=<size>       Set block size (default: 2048)");
         Console.WriteLine("    --parameter=<B,D,P,S> | -p=<B,D,P,S>  Set port parameter (default: " +
                           DefaultSerialPortParameter + ")");
         Console.WriteLine("        B: BaudRate, Possible values are:");

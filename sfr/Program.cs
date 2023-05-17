@@ -1,23 +1,26 @@
 ﻿global using ControlledStreamProtocol;
-
 using System.Diagnostics;
 using System.IO.Ports;
-using System.Reflection;
 using System.Text;
 using ConsoleExtension;
 using ControlledStreamProtocol.Extensions;
+using ControlledStreamProtocol.PortStream;
 using ControlledStreamProtocol.Static;
-
 using sfr;
 
+Logger.Low("SFR - Serial File Receiver v2.2.0");
+Logger.Low("CopyRight (C) 2023, by Lovespite.");
+Logger.Low("Protocol version: " + ProtocolBase.BaseVersion.ToString("X"));
+Logger.Low("Platform: " + Environment.OSVersion);
+Logger.Low("---------------------------------");
+Logger.Low("Loading protocols...");
 
-CConsole.Low("SFR - Serial File Receiver v2.2.0");
-CConsole.Low("CopyRight (C) 2023, by Lovespite.");
-CConsole.Low("Protocol version: " + ProtocolBase.BaseVersion.ToString("X"));
-CConsole.Low(Environment.OSVersion.ToString());
-CConsole.Low("---------------------------------");
-CConsole.Low("Loading protocols...");
-Protocol.LoadProtocolsFromAssembly(Assembly.GetExecutingAssembly());
+Protocol.LoadProtocolsFromPath(
+    Path.Combine(
+        Path.GetDirectoryName(AppContext.BaseDirectory) ?? Environment.CurrentDirectory,
+        "Protocols"
+    )
+);
 
 if (args.Length < 1 || args.Contains("--help") || args.Contains("-h"))
 {
@@ -35,7 +38,7 @@ if (modeListPorts)
 var modeListDevices = args.Contains("--list-devices") || args.Contains("-L");
 if (modeListDevices)
 {
-    var devs = USBHelper.ListDevices(true);
+    var devs = UsbHelper.ListDevices(true);
     var index = 1;
     foreach (var dev in devs)
     {
@@ -62,52 +65,7 @@ if (modeListDevices)
     return;
 }
 
-Application.KeepOpen = args.Contains("--keep-open") || args.Contains("-k");
-
-Application.Debug = args.Contains("--debug") || args.Contains("-D");
-
-Application.DebugView = Enum.Parse<DebugViewMode>((args.Where(a => a.StartsWith("--debug-view="))
-    .Select(a => a[13..])
-    .FirstOrDefault() ?? args.Where(a => a.StartsWith("-V="))
-    .Select(a => a[3..])
-    .FirstOrDefault()) ?? "both", true);
-
-Application.TextEncodingStr = (args.Where(a => a.StartsWith("--text-encoding="))
-    .Select(a => a[17..])
-    .FirstOrDefault() ?? args.Where(a => a.StartsWith("-E="))
-    .Select(a => a[3..])
-    .FirstOrDefault()) ?? "us-ascii";
-
-
-Application.Redirect = args.Where(a => a.StartsWith("--file="))
-    .Select(a => a[7..])
-    .FirstOrDefault() ?? args.Where(a => a.StartsWith("-f="))
-    .Select(a => a[3..])
-    .FirstOrDefault();
-
-
-Application.Behavior = args.Contains("--send") || args.Contains("-s")
-    ? PortMode.Send
-    : args.Contains("--receive") || args.Contains("-r")
-        ? PortMode.Receive
-        : PortMode.Send;
-
-Application.BlockSize = int.Parse((args
-    .Where(a => a.StartsWith("--block-size="))
-    .Select(a => a[13..])
-    .FirstOrDefault() ?? args
-    .Where(a => a.StartsWith("-b="))
-    .Select(a => a[3..])
-    .FirstOrDefault()) ?? "2048");
-
-Application.PortParameter = (args.Where(a => a.StartsWith("--parameter="))
-    .Select(a => a[12..])
-    .FirstOrDefault() ?? args
-    .Where(a => a.StartsWith("-p="))
-    .Select(a => a[3..])
-    .FirstOrDefault()) ?? Application.DefaultSerialPortParameter;
-
-Application.PortName = args.First();
+Application.LoadArguments(args);
 
 if (Application.Debug)
 {
@@ -124,7 +82,7 @@ else
         }
         catch (Exception e)
         {
-            CConsole.Error(e.Message);
+            Logger.Error(e.Message);
             return;
         }
 
@@ -132,12 +90,12 @@ else
     }
     else
     {
-        Application.FileName = args.Skip(1).LastOrDefault() ?? string.Empty;
+        Application.FileName = args.Skip(1).LastOrDefault(a => !a.StartsWith('-')) ?? string.Empty;
         UsingSendingMode();
     }
 }
 
-void HandleDebugReceiving(SerialPort serialPortInstance, Stream? fs)
+void HandleDebugReceiving(IControlledPortStream cps, Stream? fs)
 {
     var dataBlockSize = SerialPortHelper.GetBlockSize();
     var maxDataBfSize = dataBlockSize * 12;
@@ -154,12 +112,13 @@ void HandleDebugReceiving(SerialPort serialPortInstance, Stream? fs)
 
     var totalReceived = 0;
 
-    while (serialPortInstance.IsOpen)
+    while (cps.IsOpen)
     {
         var bytes = new byte[dataBlockSize];
         try
         {
-            var read = serialPortInstance.Read(bytes, 0, bytes.Length);
+            var read = cps.Read(bytes);
+
             if (read <= 0) continue;
 
             totalReceived += read;
@@ -167,8 +126,7 @@ void HandleDebugReceiving(SerialPort serialPortInstance, Stream? fs)
             if (fs is null)
             {
                 Debug.Assert(ms is not null);
-                var data = new Span<byte>(bytes, 0, read);
-                ms.Write(data);
+                ms.Write(bytes.AsSpan(0, read));
 
                 Console.Clear();
                 switch (Application.DebugView)
@@ -179,6 +137,7 @@ void HandleDebugReceiving(SerialPort serialPortInstance, Stream? fs)
                     case DebugViewMode.Text:
                         Console.Write(Application.TextEncoding.GetString(ms.ToArray()));
                         break;
+                    case DebugViewMode.Both:
                     default:
                         PrintBytesData(ms.ToArray(), 16, true);
                         break;
@@ -188,7 +147,7 @@ void HandleDebugReceiving(SerialPort serialPortInstance, Stream? fs)
             }
             else
             {
-                fs.WriteAndFlush(bytes, 0, read);
+                fs.WriteAndFlush(bytes.AsSpan(0, read));
 
                 // Console.SetCursorPosition(0, Console.CursorTop);
                 // Console.Write(">> Bytes data received: " + totalReceived);
@@ -208,12 +167,12 @@ void UsingDebugMode()
 {
     var dataBlockSize = SerialPortHelper.GetBlockSize();
     using Stream? fs = Application.Redirect is null ? null : File.Create(Application.Redirect);
-    using var serialPortInstance = SerialPortHelper.Create(Application.PortName, Application.PortParameter);
+    using var cps = SerialPortHelper.Create(Application.PortName, Application.PortParameter);
 
-    serialPortInstance.Open();
+    cps.Open();
 
     // ReSharper disable AccessToDisposedClosure
-    using var t = Task.Run(() => HandleDebugReceiving(serialPortInstance, fs));
+    Task.Run(() => HandleDebugReceiving(cps, fs));
     // ReSharper restore AccessToDisposedClosure
 
     try
@@ -223,23 +182,26 @@ void UsingDebugMode()
         {
             if (string.IsNullOrWhiteSpace(input)) continue;
 
-            var data = GetSendingData(input);
+            var data = GetSendingData(input).AsMemory();
+
             if (data.Length <= dataBlockSize)
             {
-                serialPortInstance.Write(data, 0, data.Length);
+                cps.Write(data);
             }
             else
             {
-                var offset = 0;
-                while (offset < data.Length)
+                var total = 0;
+                while (total < data.Length)
                 {
-                    var length = Math.Min(dataBlockSize, data.Length - offset);
-                    serialPortInstance.Write(data, offset, length);
-                    offset += length;
+                    var len = Math.Min(data.Length - total, dataBlockSize);
+                    cps.Write(data[total..(total + len)]);
+                    total += len;
                 }
             }
 
-            Console.WriteLine($"{DateTime.Now:HH:mm:ss.fff} << {data.Length} bytes sent.");
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.Write($" << {data.Length} bytes sent.\n");
+            Console.ResetColor();
         }
     }
     catch (Exception e)
@@ -248,7 +210,7 @@ void UsingDebugMode()
     }
     finally
     {
-        serialPortInstance.Close();
+        cps.Close();
     }
 
     byte[] GetSendingData(string raw)
@@ -261,25 +223,30 @@ void UsingDebugMode()
 
 void UsingReceivingMode()
 {
-    using var serialPortInstance = SerialPortHelper.Create(Application.PortName, Application.PortParameter);
-    PrintPortInfo(serialPortInstance);
+    using var cps = SerialPortHelper.Create(Application.PortName, Application.PortParameter);
+    PrintPortInfo(cps);
 
-    CConsole.Info("Receiving to \n - Directory: [" + Application.OutputDirectory + "]");
+    Logger.Info("Receiving to \n - Directory: [" + Application.OutputDirectory + "]");
 
     while (true)
     {
         try
         {
-            CConsole.Info("Listening...");
+            Logger.Info("Listening...");
 
             // receive file
-            SerialPortHelper.Receive(serialPortInstance);
+            SerialPortHelper.Receive(cps);
         }
         catch (Exception e)
         {
             Console.WriteLine();
-            CConsole.Error(e.Message);
-            if (e.StackTrace is not null) CConsole.Low(e.StackTrace);
+            Logger.Error($"\n{e.Message}");
+
+#if DEBUG
+            if (e.StackTrace is not null) Logger.Low(e.StackTrace);
+#endif
+
+            if (e.Message.Contains("port is closed")) break;
         }
 
         if (Application.KeepOpen) continue;
@@ -288,27 +255,30 @@ void UsingReceivingMode()
 }
 
 void UsingSendingMode()
-{        
-    using var serialPortInstance = SerialPortHelper.Create(Application.PortName, Application.PortParameter);
-    
+{
+    using var cps = SerialPortHelper.Create(Application.PortName, Application.PortParameter);
+
     try
     {
-        PrintPortInfo(serialPortInstance);
+        PrintPortInfo(cps);
 
-        serialPortInstance.Open();
+        cps.Open();
 
-        CConsole.Info(">> Streaming... \n - File: [" + Path.GetFileName(Application.FileName) + "]");
+        Logger.Info(">> Streaming... \n - File: [" + Path.GetFileName(Application.FileName) + "]");
 
-        SerialPortHelper.SendFile(serialPortInstance);
+        SerialPortHelper.SendFile(cps);
     }
     catch (Exception e)
     {
-        CConsole.Error(e.Message);
-        if (e.StackTrace is not null) CConsole.Low(e.StackTrace);
+        Logger.Error($"\n{e.Message}");
+
+#if DEBUG
+        if (e.StackTrace is not null) Logger.Low(e.StackTrace);
+#endif
     }
     finally
     {
-        serialPortInstance.Close();
+        cps.Close();
     }
 }
 
@@ -337,15 +307,7 @@ void PrintBytesData(byte[] data, int maxWidth = 16, bool withText = false)
     }
 }
 
-void PrintPortInfo(SerialPort serialPort)
+void PrintPortInfo(IControlledPortStream serialPort)
 {
-    Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.WriteLine("Using port [{0}] ({1}, {2}, {3}, {4}), Block Size: {5}",
-        serialPort.PortName,
-        serialPort.BaudRate,
-        serialPort.DataBits,
-        serialPort.Parity,
-        serialPort.StopBits,
-        SerialPortHelper.GetBlockSize());
-    Console.ResetColor();
+    serialPort.PrintPortInfo();
 }

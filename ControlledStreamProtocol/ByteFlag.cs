@@ -24,4 +24,9 @@ public static class Flag
             _ => "Unknown error."
         };
     }
+    
+    public static string GetErrorMessage(ByteFlag signal)
+    {
+        return GetErrorMessage((byte)signal);
+    }
 }

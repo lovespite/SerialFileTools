@@ -1,17 +1,20 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
-using System.Text;
 using ConsoleExtension;
+using ControlledStreamProtocol;
 
-
-namespace sfr;
+namespace SftpProtocol;
 
 // ReSharper disable once UnusedType.Global
+// ReSharper disable once ClassNeverInstantiated.Global
 public class FileTransferProtocol : ProtocolBase
 {
     public override string Name => "SFTP";
     public override ushort Id => 0x1000;
     public override string DisplayName => "Simple File Transfer Protocol v1.0";
+
+    private string _fileName = string.Empty;
+
     public override IReadOnlySet<ushort> CompatibleBaseVersions => new HashSet<ushort>
     {
         0x1F00
@@ -19,34 +22,61 @@ public class FileTransferProtocol : ProtocolBase
 
     protected override Stream OpenStreamIn()
     {
+        var path = GetOutputDir();
+
+        _fileName = Path.Combine(path, StreamMeta);
+
         if (IsInvalidFileName(StreamMeta))
         {
             StreamStop();
             throw new Exception("Unexpected file name:" + StreamMeta);
         }
 
-        var file = Path.Combine(Application.OutputDirectory, StreamMeta.GetStringData());
-        var fs = File.Create(file);
+        var fs = File.Create(_fileName);
 
         StreamContinue();
         return fs;
+    }
+
+    private static string GetOutputDir()
+    {
+        var path = AppContext.GetData("OutputDirectory") as string ?? Environment
+            .GetCommandLineArgs()
+            .Skip(2)
+            .LastOrDefault(a => !a.StartsWith("-"));
+        return path ?? Environment.CurrentDirectory;
+    }
+
+
+    private static string GetFileName()
+    {
+        var path = AppContext.GetData("FileName") as string;
+        return path ?? string.Empty;
     }
 
     protected override long ProcessDataStreamIn(Stream stream, ReadOnlyMemory<byte> data)
     {
         var shouldRead = StreamMeta.BlockSize;
 
+        if (data.Length == 0)
+        {
+            StreamStop();
+            return 0;
+        }
+
         if (data.Length != shouldRead)
         {
-            CConsole.Warn("\nData block incomplete warning:");
-            CConsole.Warn($" - Block size mismatch. Expected: {shouldRead}, received: {data.Length}");
-            CConsole.Warn($" - Waiting for retransmission...");
+            Logger.Warn("\nData block incomplete warning:");
+            Logger.Warn($" - Block size mismatch. Expected: {shouldRead}, received: {data.Length}");
+            Logger.Warn($" - Waiting for retransmission...");
+
             StreamRetry();
         }
         else
         {
             stream.Write(data.Span);
             PrintProgress(StreamMeta.Length, TimeElapsed, stream.Length);
+
             StreamContinue();
         }
 
@@ -58,8 +88,6 @@ public class FileTransferProtocol : ProtocolBase
         stream.SetLength(StreamMeta.Length);
         stream.Flush();
 
-        var file = Path.Combine(Application.OutputDirectory, StreamMeta);
-
         stream.Seek(0, SeekOrigin.Begin);
 
         var sha1 = SHA1.HashDataAsync(stream).AsTask();
@@ -68,75 +96,78 @@ public class FileTransferProtocol : ProtocolBase
 
         if (isMatch)
         {
-            CConsole.Ok("\nFile received successfully.");
-            CConsole.Info("  - File: " + file);
+            Logger.Ok("\nFile received successfully.");
+            Logger.Info("  - File: " + _fileName);
         }
         else
         {
-            CConsole.Error("\nFile received with error:");
-            CConsole.Warn($"  - SHA1 Expected: {Convert.ToHexString(StreamMeta.SignatureBlock)}");
-            CConsole.Warn($"  -      Received: {Convert.ToHexString(sha1.Result)}");
+            Logger.Error("\nFile received with error:");
+            Logger.Warn($"  - SHA1 Expected: {Convert.ToHexString(StreamMeta.SignatureBlock)}");
+            Logger.Warn($"  -      Received: {Convert.ToHexString(sha1.Result)}");
         }
     }
 
-    protected override void BeforeStreamingOut(Stream stream)
+    protected override Stream OpenStreamOut()
     {
+        Logger.Info("\nWaiting for response...");
+
+        var f = StreamWaitForFlag();
+
+        if (f != ByteFlag.Continue)
+        { 
+            throw new Exception("Error: " + Flag.GetErrorMessage(f));
+        }
+
+        Logger.Ok("\n>> Streaming...");
+
+        var file = GetFileName();
+        Debug.Assert(File.Exists(file));
+        return File.OpenRead(file);
     }
 
     protected override void ProcessDataStreamOut(Stream stream)
     {
-        var buffer = new byte[StreamMeta.BlockSize];
+        var buffer = new byte[StreamMeta.BlockSize].AsMemory();
         int read;
         var totalRead = 0L;
 
-        var sw = new Stopwatch();
-        sw.Start();
-
-        while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+        while ((read = stream.Read(buffer.Span)) > 0)
         {
             totalRead += read;
 
             // send data block
-            Port!.Write(buffer, 0, buffer.Length);
-
-            // calculate and print progress
-            PrintProgress(StreamMeta.Length, sw, totalRead);
+            StreamSendBlock(buffer);
 
             var retry = 0;
-            int head;
-            while ((head = Port.ReadByte()) != (int)ByteFlag.Continue)
+            do
             {
-                if (head == (int)ByteFlag.Incomplete)
+                var flag = StreamWaitForFlag();
+                if (flag == ByteFlag.Continue) break;
+                if (flag == ByteFlag.Incomplete)
                 {
-                    if (retry == 0) Console.Write("\n");
-                    CConsole.Warn($"Block retransmitting requested...{++retry}");
-
                     // block transfer incomplete, retry
-                    Port.DiscardOutBuffer();
-                    Port.Write(buffer, 0, buffer.Length);
+                    StreamSendBlock(buffer);
+                    if (retry == 0) Console.Write("\n");
+                    Logger.Warn($"Block retransmitting requested...{++retry}");
+                }
+                else if (flag == ByteFlag.StopBy)
+                {
+                    throw new Exception(Flag.GetErrorMessage(flag));
                 }
                 else
                 {
-                    throw new Exception(Flag.GetErrorMessage((byte)head));
+                    throw new Exception("Unexpected flag: " + flag);
                 }
-            }
-        }
+            } while (true);
 
-        sw.Stop();
+            // calculate and print progress
+            PrintProgress(StreamMeta.Length, TimeElapsed, totalRead);
+        }
     }
 
     protected override void AfterStreamingOut(Stream stream)
     {
-    }
-
-
-    private static void PrintProgress(long totalLength, Stopwatch sw, long totalRead)
-    {
-        // calculate and print progress
-        var speed = totalRead / 1024f * 1000 / sw.ElapsedMilliseconds;
-        var remainingTime = (totalLength - totalRead) / 1024f / speed;
-        Console.SetCursorPosition(0, Console.CursorTop);
-        Console.Write(ProgressOf(totalLength, totalRead, speed, (int)Math.Ceiling(remainingTime)));
+        stream.Close();
     }
 
     private static void PrintProgress(long totalLength, long timeElapsed, long totalRead)

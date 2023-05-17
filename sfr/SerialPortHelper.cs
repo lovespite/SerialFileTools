@@ -1,8 +1,7 @@
-using System.IO.Ports;
 using System.Security.Cryptography;
 using ConsoleExtension;
 using ControlledStreamProtocol.Exceptions;
-using ControlledStreamProtocol.Extensions;
+using ControlledStreamProtocol.PortStream;
 using ControlledStreamProtocol.Static;
 
 namespace sfr;
@@ -11,36 +10,9 @@ public static class SerialPortHelper
 {
     public static int GetBlockSize() => Application.BlockSize;
 
-    public static SerialPort Create(string portName, string parameter)
+    public static IControlledPortStream Create(string portName, string parameter)
     {
-        var parts = parameter.Split(',');
-        var baudRate = int.Parse(parts[0]);
-
-        var dataBits = parts.Length > 1 ? int.Parse(parts[1]) : 8;
-
-        var parity = parts.Length > 2
-            ? parts[2] switch
-            {
-                "N" => Parity.None,
-                "E" => Parity.Even,
-                "O" => Parity.Odd,
-                "M" => Parity.Mark,
-                "S" => Parity.Space,
-                _ => throw new ArgumentException("Invalid parity.", nameof(parameter))
-            }
-            : Parity.None;
-
-        var stopBits = parts.Length > 3
-            ? parts[3] switch
-            {
-                "1" => StopBits.One,
-                "1.5" => StopBits.OnePointFive,
-                "2" => StopBits.Two,
-                _ => throw new ArgumentException("Invalid stop bits.", nameof(parameter))
-            }
-            : StopBits.One;
-
-        return new SerialPort(portName, baudRate, parity, dataBits, stopBits);
+        return SyncPortStream.Create(portName, parameter);
     }
 
     private static Meta GetFileMetaInfo(string name, Stream fs)
@@ -63,51 +35,79 @@ public static class SerialPortHelper
         return meta;
     }
 
-    public static void SendFile(SerialPort sp)
-    { 
+    private static Meta GetEmptyMeta()
+    {
+        return new FileMetaInfo
+        {
+            FileName = string.Empty,
+            Length = 0,
+            Sha1 = new byte[20],
+            BlockSize = GetBlockSize(),
+            ProtocolId = 0,
+            BaseVersion = ProtocolBase.BaseVersion,
+        }.AsMeta();
+    }
+
+    public static void SendFile(IControlledPortStream sp)
+    {
         sp.DiscardOutBuffer();
-        sp.DiscardInBuffer(); 
+        sp.DiscardInBuffer();
 
         var file = Application.FileName;
 
-        using var fs = File.OpenRead(file);
+        Meta meta;
 
-        var meta = GetFileMetaInfo(Path.GetFileName(file), fs);
-        Protocol.Create(Protocol.Sftp.Name, sp, ref meta, out var protocol);
-
-        var bytes = meta.GetBytes();
-        // send file meta info
-        sp.Write(bytes.ToArray(), 0, bytes.Length);
-
-        CConsole.Info("\nFile info sent. Waiting for response...");
-
-        var head = sp.ReadByte();
-
-        if (head != 0xBB)
+        if (string.IsNullOrEmpty(file))
         {
-            CConsole.Error("\nError sending file: " + Flag.GetErrorMessage((byte)head));
-            return;
+            meta = GetEmptyMeta();
+        }
+        else
+        {
+            using var fs = File.OpenRead(file);
+            meta = GetFileMetaInfo(Path.GetFileName(file), fs);
+            fs.Close();
         }
 
-        CConsole.Ok("\nConfirmed. Send file data...");
+        // ReSharper disable once AccessToStaticMemberViaDerivedType
+        var pName = Application.Protocol;
 
-        protocol.Send(fs);
+        if (string.IsNullOrEmpty(pName)) pName = Protocol.Default?.Name;
 
-        CConsole.Ok("\nFile sent successfully.");
+        if (string.IsNullOrEmpty(pName))
+        {
+            throw new Exception("Protocol not specified. No default protocol available.");
+        }
+
+        Protocol.Create(pName, sp, ref meta, out var protocol);
+
+        Logger.Low("Using protocol: ");
+        Logger.Low($"  - Id: {protocol.Id:X}");
+        Logger.Low($"  - Name: {protocol.Name}");
+        Logger.Low($"  -       {protocol.DisplayName}");
+        Logger.Low($"  - Path: {protocol.GetType().Assembly.Location}");
+
+        // send file meta info
+        sp.Write(meta);
+        
+        protocol.Send();
+
+        Logger.Ok("\nPipes closed.");
     }
 
 
-    private static Meta ReceiveMetaData(SerialPort sp)
-    { 
-        sp.ReadTimeout = SerialPort.InfiniteTimeout;
-        while (sp.ReadByte() != (int)ByteFlag.Head)
+    private const int MetaHead = (int)ByteFlag.Head;
+
+    private static Meta ReceiveMetaData(IControlledPortStream sp)
+    {
+        sp.ReadTimeout = IControlledPortStream.InfiniteTimeout;
+        while (sp.ReadByte() != MetaHead)
         {
         }
 
         var buffer = new byte[Meta.StructSize];
-        buffer[0] = (int)ByteFlag.Head;
+        buffer[0] = MetaHead;
 
-        var read = sp.ReadAtLeast(buffer, 1, buffer.Length - 1); 
+        var read = sp.ReadAtLeast(buffer, 1, buffer.Length - 1);
 
         if (read < buffer.Length - 1)
         {
@@ -119,12 +119,12 @@ public static class SerialPortHelper
         return metaInfo;
     }
 
-    public static void Receive(SerialPort sp)
+    public static void Receive(IControlledPortStream sp)
     {
         try
         {
             sp.Open();
-            
+
             var meta = ReceiveMetaData(sp);
             meta.Print();
             meta.CheckCrc16();
@@ -133,7 +133,7 @@ public static class SerialPortHelper
 
             Protocol.Create(ref meta, sp, out var protocol);
 
-            CConsole.Ok(">> Streaming...");
+            Logger.Ok(">> Streaming...");
             protocol.Receive();
             Console.WriteLine();
         }

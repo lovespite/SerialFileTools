@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using ConsoleExtension;
 using Crc16;
 
 namespace ControlledStreamProtocol;
@@ -134,22 +135,22 @@ public struct Meta
     {
         var p = Static.Protocol.GetProtocol(Protocol);
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($">> Meta received:");
-        Console.WriteLine($"  -           Head: {Head:X2}");
-        Console.WriteLine($"  -     DataLength: {DataLength}");
-        Console.WriteLine($"  -       CodePage: {CodePage}, {Encoding.GetEncoding(CodePage).EncodingName}");
-        Console.WriteLine($"  -         Length: {Length}");
-        Console.WriteLine($"  -      BlockSize: {BlockSize}");
-        Console.WriteLine($"  -          Block: {Convert.ToHexString(SignatureBlock)}");
-        Console.WriteLine($"  -       Reserved: {Convert.ToHexString(Reserved)}");
-        Console.WriteLine($"  -    BaseVersion: {BaseVersion}");
-        Console.WriteLine($"  -       Protocol: {Protocol:X}");
-        Console.WriteLine($"                    {p?.Name}");
-        Console.WriteLine($"                    {p?.DisplayName}");
-        Console.WriteLine($"  -      DataBytes: {this}");
-        Console.WriteLine($"  -          Crc16: {Crc16:X4}");
+
+        Logger.Info($">> Meta received:");
+        Logger.Info($"  -           Head: {Head:X2}");
+        Logger.Info($"  -     DataLength: {DataLength}");
+        Logger.Info($"  -       CodePage: {CodePage}, {Encoding.GetEncoding(CodePage).EncodingName}");
+        Logger.Info($"  -         Length: {Length}");
+        Logger.Info($"  -      BlockSize: {BlockSize}");
+        Logger.Info($"  -          Block: {Convert.ToHexString(SignatureBlock)}");
+        Logger.Info($"  -       Reserved: {Convert.ToHexString(Reserved)}");
+        Logger.Info($"  -    BaseVersion: {BaseVersion}");
+        Logger.Info($"  -       Protocol: {Protocol:X}");
+        Logger.Info($"                    {p?.Name}");
+        Logger.Info($"                    {p?.DisplayName}");
+        Logger.Info($"  -      DataBytes: {this}");
+        Logger.Info($"  -          Crc16: {Crc16:X4}");
         Console.WriteLine();
-        Console.ResetColor();
     }
 
     public override string ToString()
@@ -157,6 +158,7 @@ public struct Meta
         return GetStringData();
     }
 
+    public static implicit operator ReadOnlyMemory<byte>(Meta meta) => meta.GetBytes();
     public static implicit operator byte[](Meta meta) => meta.GetBytes().ToArray();
     public static implicit operator string(Meta meta) => meta.ToString();
 }

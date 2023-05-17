@@ -2,11 +2,10 @@ namespace sfr;
 
 using LibUsbDotNet;
 using LibUsbDotNet.Main;
-using LibUsbDotNet.Info;
 using LibUsbDotNet.WinUsb;
 using LibUsbDotNet.LibUsb;
 
-public class USBHelper
+public class UsbHelper
 {
     // enum usb devices
 

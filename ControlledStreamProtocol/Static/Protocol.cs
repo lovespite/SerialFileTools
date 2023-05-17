@@ -1,16 +1,16 @@
 using System.Diagnostics;
-using System.IO.Ports;
 using System.Reflection;
 using ConsoleExtension;
 using ControlledStreamProtocol.Exceptions;
 using ControlledStreamProtocol.Extensions;
+using ControlledStreamProtocol.PortStream;
 
 namespace ControlledStreamProtocol.Static;
 
 public static class Protocol
 {
     // quick access
-    public static ProtocolBase Sftp => Protocols[0x1000];
+    public static ProtocolBase? Default => Protocols.Values.FirstOrDefault();
 
     private static readonly Dictionary<ushort, ProtocolBase> Protocols = new();
 
@@ -19,6 +19,15 @@ public static class Protocol
         return
             type.IsSubclassOf(typeof(ProtocolBase))
             || (!type.IsAbstract && type.Name.EndsWith("Protocol"));
+    }
+
+    public static void LoadProtocolsFromPath(string path)
+    {
+        if (!Directory.Exists(path)) return;
+        foreach (var file in Directory.EnumerateFiles(path, "*Protocol.dll"))
+        {
+            LoadProtocolsFromAssembly(file);
+        }
     }
 
     public static void LoadProtocolsFromAssembly(Assembly assembly)
@@ -51,43 +60,52 @@ public static class Protocol
         var p = (ProtocolBase?)Activator.CreateInstance(t);
         if (p is null)
         {
-            CConsole.Error("Protocol load failed: ");
-            CConsole.Low($" -  TypeName: {t.Name}:");
-            CConsole.Low($" -  FullName: {t.FullName}");
+            Logger.Error("Protocol load failed: ");
+            Logger.Low($" -  TypeName: {t.Name}:");
+            Logger.Low($" -  FullName: {t.FullName}");
+            Logger.Low($" -      Path: {t.Assembly.Location}");
             Console.WriteLine();
             return;
         }
 
         if (!p.CompatibleBaseVersions.Contains(ProtocolBase.BaseVersion))
         {
-            CConsole.Warn("Protocol base version not compatible: ");
-            CConsole.Low("  - Attempt to load (ignored): ");
-            CConsole.Low($"   -  Name: {p.Name}:");
-            CConsole.Low($"   -        {p.DisplayName}");
-            CConsole.Low($"   -    ID: {p.Id:X}");
-            CConsole.Low($"   -  Base: {ProtocolBase.BaseVersion:X}");
+            Logger.Warn("Protocol base version not compatible: ");
+            Logger.Low("  - Attempt to load (ignored): ");
+            Logger.Low($"   -  Name: {p.Name}:");
+            Logger.Low($"   -        {p.DisplayName}");
+            Logger.Low($"   -    ID: {p.Id:X}");
+            Logger.Low($"   -  Path: {t.Assembly.Location}");
+            Logger.Low($"   -  Base: {ProtocolBase.BaseVersion:X}");
+            Logger.Low($"   -  Compatible versions: {string.Join(',', p.CompatibleBaseVersions)}");
+
             Console.WriteLine();
+            return;
         }
 
         if (Protocols.TryGetValue(p.Id, out var value))
         {
-            CConsole.Warn("Protocol conflict: ");
-            CConsole.Ok("  - Loaded: ");
-            CConsole.Ok($"   -  Name: {value.Name}:");
-            CConsole.Ok($"   -        {value.DisplayName}");
-            CConsole.Ok($"   -    ID: {value.Id:X}");
+            Logger.Warn("Protocol conflict: ");
+            Logger.Ok("  Loaded: ");
+            Logger.Ok($"   -  Name: {value.Name}:");
+            Logger.Ok($"   -        {value.DisplayName}");
+            Logger.Ok($"   -    ID: {value.Id:X}");
+            Logger.Ok($"   -  Path: {value.GetType().Assembly.Location}");
 
-            CConsole.Low("  - Attempt to load (ignored): ");
-            CConsole.Low($"   -  Name: {p.Name}:");
-            CConsole.Low($"   -        {p.DisplayName}");
-            CConsole.Low($"   -    ID: {p.Id:X}");
+            Logger.Low("  Attempt to load (ignored): ");
+            Logger.Low($"   -  Name: {p.Name}:");
+            Logger.Low($"   -        {p.DisplayName}");
+            Logger.Low($"   -    ID: {p.Id:X}");
+            Logger.Low($"   -  Path: {t.Assembly.Location}");
             Console.WriteLine();
+            return;
         }
 
-        CConsole.Ok($"Protocol loaded ({Protocols.Count + 1}) :");
-        CConsole.Low($" -  Name: {p.Name}:");
-        CConsole.Low($" -        {p.DisplayName}");
-        CConsole.Low($" -    ID: {p.Id:X}");
+        Logger.Ok($"Protocol loaded ({Protocols.Count + 1}) :");
+        Logger.Low($" -  Name: {p.Name}:");
+        Logger.Low($" -        {p.DisplayName}");
+        Logger.Low($" -    ID: {p.Id:X}");
+        Logger.Low($" -  Path: {t.Assembly.Location}");
         Console.WriteLine();
 
         Protocols.Add(p.Id, p);
@@ -114,13 +132,13 @@ public static class Protocol
         return protocol is not null;
     }
 
-    public static void Create(ref Meta meta, SerialPort sp, out ProtocolBase newProtocol)
+    public static void Create(ref Meta meta, IControlledPortStream sp, out ProtocolBase newProtocol)
     {
         Create(meta.Protocol, out newProtocol);
         newProtocol.Bind(sp, ref meta);
     }
 
-    public static void Create(string name, SerialPort sp, ref Meta meta, out ProtocolBase newProtocol)
+    public static void Create(string name, IControlledPortStream sp, ref Meta meta, out ProtocolBase newProtocol)
     {
         Create(name, out newProtocol);
         meta.Protocol = newProtocol.Id;

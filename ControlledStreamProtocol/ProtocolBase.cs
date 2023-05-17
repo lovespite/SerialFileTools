@@ -1,6 +1,6 @@
-using System.Diagnostics; 
-using System.IO.Ports; 
-using ControlledStreamProtocol.Exceptions; 
+using System.Diagnostics;
+using ControlledStreamProtocol.Exceptions;
+using ControlledStreamProtocol.PortStream;
 
 namespace ControlledStreamProtocol;
 
@@ -13,18 +13,18 @@ public abstract class ProtocolBase : IDisposable
     private static readonly byte[] ProtocolMismatch = { (byte)ByteFlag.ProtocolMismatch };
     private static readonly byte[] ProtocolNotSupported = { (byte)ByteFlag.ProtocolNotSupported };
     private static readonly byte[] Incomplete = { (byte)ByteFlag.Incomplete };
-    
+
     public static void CheckBaseVersion(ref Meta meta)
     {
         if (meta.BaseVersion != BaseVersion)
             throw new ProtocolBaseVersionNotMatchException(BaseVersion, meta.BaseVersion);
     }
 
-    protected SerialPort? Port { get; private set; }
+    private IControlledPortStream? Port { get; set; }
 
     protected Meta StreamMeta;
 
-    public void Bind(SerialPort port, ref Meta meta)
+    public void Bind(IControlledPortStream port, ref Meta meta)
     {
         if (Port is not null) Release();
 
@@ -42,28 +42,14 @@ public abstract class ProtocolBase : IDisposable
         if (Port is null) throw new NullReferenceException("Port is not bound.");
     }
 
-    public static byte[] FeedbackOf(ByteFlag signal)
-    {
-        return signal switch
-        {
-            ByteFlag.Continue => Continue,
-            ByteFlag.StopBy => StopBy,
-            ByteFlag.Incomplete => Incomplete,
-            ByteFlag.ProtocolMismatch => ProtocolMismatch,
-            ByteFlag.ProtocolNotSupported => ProtocolNotSupported,
-            ByteFlag.Head => new[] { (byte)ByteFlag.Head },
-            _ => throw new ArgumentOutOfRangeException(nameof(signal), signal, null)
-        };
-    }
-
     private Stopwatch _stopwatch = new();
     protected long TimeElapsed => _stopwatch.ElapsedMilliseconds;
 
     public abstract string Name { get; }
     public abstract ushort Id { get; }
-    public abstract string DisplayName { get; } 
+    public abstract string DisplayName { get; }
     public abstract IReadOnlySet<ushort> CompatibleBaseVersions { get; }
-    
+
     #region Receiving Stream
 
     // receive
@@ -78,20 +64,23 @@ public abstract class ProtocolBase : IDisposable
         Debug.Assert(Port is not null);
         Debug.Assert(Port.IsOpen);
 
+        Port.DiscardOutBuffer();
+        Port.DiscardInBuffer();
+
         ResetStreamFlag();
         using var stream = OpenStreamIn();
 
         _stopwatch = Stopwatch.StartNew();
-  
+
         long leftBytes;
+        var buffer = new byte[StreamMeta.BlockSize];
         do
-        {      
-            var dataBlock = ReadSerialPort(StreamMeta.BlockSize, out var read);
+        {
+            var read = StreamWaitForResponse(buffer);
 
             ResetStreamFlag();
-            leftBytes = ProcessDataStreamIn(stream, dataBlock[..read]);
+            leftBytes = ProcessDataStreamIn(stream, buffer.AsMemory(0, read));
             CheckStreamFlag(); // check if stream was controlled
-            
         } while (leftBytes > 0);
 
         _stopwatch.Stop();
@@ -104,19 +93,31 @@ public abstract class ProtocolBase : IDisposable
 
     #region Sending Stream
 
+    protected delegate void SendBlock(ReadOnlyMemory<byte> data);
+
+    protected delegate int WaitResponse(byte[] buffer, int msTimeout = 1000);
+
+    protected delegate ByteFlag WaitFlag(int msTimeout = 1000);
+
+
     // send
-    protected abstract void BeforeStreamingOut(Stream stream);
+    protected abstract Stream OpenStreamOut();
+    // protected abstract void ProcessDataStreamOut(Stream stream);
+
     protected abstract void ProcessDataStreamOut(Stream stream);
+
     protected abstract void AfterStreamingOut(Stream stream);
 
-    public void Send(Stream stream)
+    public void Send()
     {
         CheckPort();
         Debug.Assert(Port is not null);
         Debug.Assert(Port.IsOpen);
 
-        BeforeStreamingOut(stream);
+        using var stream = OpenStreamOut();
+        _stopwatch = Stopwatch.StartNew();
         ProcessDataStreamOut(stream);
+        _stopwatch.Stop();
         AfterStreamingOut(stream);
     }
 
@@ -177,41 +178,25 @@ public abstract class ProtocolBase : IDisposable
         SetStreamFlag();
     }
 
-    #endregion
-
-    #region Raw SerialPort Read
-
-    protected ReadOnlyMemory<byte> ReadSerialPort(int length, out int read)
+    protected ByteFlag StreamWaitForFlag(int msTimeout = 1000)
     {
-        var buffer = new byte[length];
-        read = ReadAtLeast(Port!, buffer, 0, length);
-        return buffer;
+        Port!.ReadTimeout = msTimeout;
+        var flagByte = Port!.ReadByte();
+        Port!.ReadTimeout = IControlledPortStream.InfiniteTimeout;
+        return (ByteFlag)flagByte;
     }
 
-    private static int ReadAtLeast(SerialPort serialPort, byte[] buffer, int offset, int count, int timeout = 500)
+    protected int StreamWaitForResponse(byte[] buffer, int msTimeout = 3000)
     {
-        var start = DateTime.Now;
-        var read = 0;
-        serialPort.ReadTimeout = timeout;
-        var span = TimeSpan.FromMilliseconds(timeout);
-
-        while (read < count)
-        {
-            if (DateTime.Now - start > span) break;
-            try
-            {
-                read += serialPort.Read(buffer, offset + read, count - read);
-                start = DateTime.Now;
-                if (read == 0) Task.Delay(10).Wait();
-            }
-            catch (TimeoutException)
-            {
-                break;
-            }
-        }
-
-        serialPort.ReadTimeout = SerialPort.InfiniteTimeout;
+        var read = Port!.ReadAtLeast(buffer, msTimeout);
         return read;
+    }
+
+    protected void StreamSendBlock(ReadOnlyMemory<byte> block)
+    {
+        if (block.Length != StreamMeta.BlockSize)
+            throw new ArgumentOutOfRangeException(nameof(block), block.Length, null);
+        Port!.Write(block);
     }
 
     #endregion
@@ -221,14 +206,14 @@ public abstract class ProtocolBase : IDisposable
     #region Private Static
 
     // Private static methods
-    private static void StreamContinue(SerialPort port)
+    private static void StreamContinue(IControlledPortStream port)
     {
-        port.Write(Continue, 0, 1);
+        port.Write(Continue);
     }
 
-    private static void StreamRetry(SerialPort port)
+    private static void StreamRetry(IControlledPortStream port)
     {
-        port.Write(Incomplete, 0, 1);
+        port.Write(Incomplete);
     }
 
     #endregion
@@ -237,19 +222,19 @@ public abstract class ProtocolBase : IDisposable
 
     // Public static methods
 
-    public static void StreamStop(SerialPort port)
+    public static void StreamStop(IControlledPortStream port)
     {
-        port.Write(StopBy, 0, 1);
+        port.Write(StopBy);
     }
 
-    public static void StreamFeedProtocolMismatch(SerialPort port)
+    public static void StreamFeedProtocolMismatch(IControlledPortStream port)
     {
-        port.Write(ProtocolMismatch, 0, 1);
+        port.Write(ProtocolMismatch);
     }
 
-    public static void StreamFeedProtocolNotSupported(SerialPort port)
+    public static void StreamFeedProtocolNotSupported(IControlledPortStream port)
     {
-        port.Write(ProtocolNotSupported, 0, 1);
+        port.Write(ProtocolNotSupported);
     }
 
     #endregion

@@ -28,3 +28,19 @@ public class ProtocolBaseVersionNotMatchException : Exception
     {
     }
 }
+
+public class StreamReadFailedException : Exception
+{
+    public StreamReadFailedException()
+        : base("Stream read failed.")
+    {
+    }
+}
+
+public class StreamReachingEndException : Exception
+{
+    public StreamReachingEndException()
+        : base("Stream reaching end.")
+    {
+    }
+}

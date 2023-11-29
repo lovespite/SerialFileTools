@@ -22,11 +22,11 @@ public static class Application
         "utf-32"
     };
 
-    private static string DefaultSerialPortParameter => "460800,8,N,1";
+    private static string DefaultSerialPortParameter => "1600000,8,N,1";
 
     private static string _portName = string.Empty;
 
-    public static string Protocol = string.Empty;
+    public static string Protocol { get; set; } = string.Empty;
 
     public static string PortName
     {

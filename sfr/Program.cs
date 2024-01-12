@@ -22,7 +22,7 @@ if (modeListPorts)
 }
 
 Logger.Low("SFR - Serial File Receiver v2.5.1");
-Logger.Low("CopyRight (C) 2023, by Lovespite.");
+Logger.Low("CopyRight (C) 2024, by Lovespite.");
 Logger.Low("Protocol version: " + ProtocolBase.BaseVersion.ToString("X"));
 Logger.Low("Platform: " + Environment.OSVersion);
 Logger.Low("---------------------------------");

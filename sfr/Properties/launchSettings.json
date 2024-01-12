@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "sfr": {
+      "commandName": "Project",
+      "commandLineArgs": "... -r -k"
+    }
+  }
+}

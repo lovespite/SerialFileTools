@@ -46,7 +46,7 @@ public class FileTransferProtocol : ProtocolBase
         var path = AppContext.GetData("OutputDirectory") as string ?? Environment
             .GetCommandLineArgs()
             .Skip(2)
-            .LastOrDefault(a => !a.StartsWith("-"));
+            .LastOrDefault(a => !a.StartsWith('-'));
         return path ?? Environment.CurrentDirectory;
     }
 
